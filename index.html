@@ -109,6 +109,23 @@
   input[type=file]{ width:100%; font-size:13px; padding:9px; border:1.5px dashed var(--line); border-radius:10px; background:#FBFDFE; color:var(--sub) }
   #imgPreview img, .hist-thumb{ height:64px; border-radius:8px; border:1px solid var(--line); margin-top:8px; cursor:pointer }
   .hist-thumb{ margin-top:6px }
+  #smsModal{ display:none; position:fixed; inset:0; background:rgba(10,25,38,.7); z-index:55;
+    align-items:center; justify-content:center; padding:16px }
+  #smsModal.on{ display:flex }
+  #smsModal .sms-box{ background:#fff; border-radius:14px; width:100%; max-width:520px;
+    max-height:calc(100vh - 32px); overflow-y:auto; padding:18px 18px 14px; box-shadow:0 12px 32px rgba(0,0,0,.25) }
+  #smsModal .sms-title{ font-size:16px; font-weight:800; color:var(--water-deep); margin-bottom:12px }
+  #smsModal .sms-section{ margin-bottom:12px }
+  #smsModal .sms-label{ font-size:12.5px; font-weight:700; color:var(--sub); margin-bottom:4px }
+  #smsModal .sms-recipients{ background:#F4F8FB; border:1px solid var(--line); border-radius:8px;
+    padding:8px 10px; font-size:13px; max-height:120px; overflow-y:auto }
+  #smsModal .sms-recipients .r-item{ display:inline-block; background:#fff; border:1px solid var(--line);
+    border-radius:6px; padding:3px 8px; margin:3px 4px 3px 0; font-size:12.5px }
+  #smsModal textarea{ width:100%; padding:10px 12px; font-size:13.5px; line-height:1.5;
+    border:1.5px solid var(--line); border-radius:10px; background:#FBFDFE; color:var(--ink);
+    font-family:inherit; resize:vertical; min-height:180px; box-sizing:border-box }
+  #smsModal .sms-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:8px }
+  #smsModal .sms-actions .btn{ flex:0 0 auto; padding:10px 18px }
   #imgModal{ display:none; position:fixed; inset:0; background:rgba(10,25,38,.85); z-index:50;
     align-items:center; justify-content:center; padding:20px; flex-direction:column }
   #imgModal img{ max-width:100%; max-height:82vh; border-radius:10px; background:#fff }
@@ -378,8 +395,9 @@
   </table>
   <div class="note" id="checkNote"></div>
   <div class="copybox" id="copybox"></div>
+  <div id="photoLinks" style="display:none;margin-top:8px;font-size:13px;background:#F4F8FB;border:1px solid var(--line);border-radius:10px;padding:10px"></div>
   <button class="btn ghost" onclick="copyText()">가족방에 붙여넣을 문구 복사</button>
-  <button class="btn ghost" id="smsBtn" style="display:none" onclick="sendSms()">📱 가족에게 문자 보내기</button>
+  <button class="btn ghost" id="smsBtn" style="display:none" onclick="openSmsPreview()">📱 구성원에게 문자 보내기</button>
   <button class="btn" id="saveBtn" onclick="save()">이번 검침값 저장 (다음 정산 준비)</button>
 </div>
 
@@ -431,6 +449,25 @@
   <div id="modalCap" style="color:#fff;font-size:14px;font-weight:700;margin-bottom:10px"></div>
   <img id="modalImg" alt="고지서 사진">
   <button class="close">닫기</button>
+</div>
+
+<div id="smsModal">
+  <div class="sms-box">
+    <div class="sms-title">📱 문자 보내기 미리보기</div>
+    <div class="sms-section">
+      <div class="sms-label">받는 사람</div>
+      <div id="smsTo" class="sms-recipients"></div>
+    </div>
+    <div class="sms-section">
+      <div class="sms-label">문자 내용 <span class="hint" style="font-weight:400">(편집 가능)</span></div>
+      <textarea id="smsBody" rows="10"></textarea>
+      <div class="hint" id="smsLen" style="margin-top:4px"></div>
+    </div>
+    <div class="sms-actions">
+      <button class="btn ghost" onclick="closeSmsPreview()">취소</button>
+      <button class="btn" onclick="confirmSendSms()">📨 문자앱 열기</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -1105,6 +1142,7 @@ function calc(){
   txt+='\n(계량기 사진 첨부)';
   txt+='\n※ 시청 검침일과 자체 검침일이 달라 고지서 톤수와 층별 합계는 다를 수 있습니다. 금액은 비율 배분이라 오차 없이 정산되며, 구간 차이는 다음 정산에 자동 반영됩니다.';
   $('copybox').textContent=txt;
+  const pl=$('photoLinks'); if(pl){ pl.style.display='none'; pl.innerHTML=''; }
 
   lastCalc={date,total,billMonth,use,amt,prev,curr,sum,finals,extraPer,extraSum,split:splitLabel,
     extras:extras.map(x=>({name:x.name,amt:x.amt,mode:x.mode,month:x.month,per:x.per})),
@@ -1114,6 +1152,36 @@ function calc(){
   if(data.phones&&data.phones.length) $('smsBtn').style.display='block';
   $('saveBtn').textContent='이번 검침값 저장 (다음 정산 준비)';
   $('result').scrollIntoView({behavior:'smooth'});
+}
+
+function applyPhotoLinks(urls){
+  const labels={bill:'📄 고지서',f1:'1층 계량기',f2:'2층 계량기',f3:'3층 계량기'};
+  const order=['bill','f1','f2','f3'];
+  const items=order.filter(k=>urls[k]).map(k=>({key:k,label:labels[k],url:urls[k]}));
+  // 공유 문구의 "(계량기 사진 첨부)" 자리 → 실제 링크 목록으로 교체
+  const box=$('copybox'); if(box){
+    let txt=box.textContent;
+    const placeholder='(계량기 사진 첨부)';
+    const block=items.length
+      ? '📷 사진 링크\n'+items.map(it=>`· ${it.label}: ${it.url}`).join('\n')
+      : '(사진 없음)';
+    if(txt.indexOf(placeholder)>=0) txt=txt.replace(placeholder,block);
+    else txt=txt+'\n'+block;
+    box.textContent=txt;
+  }
+  // 결과 카드 안에 클릭 가능한 링크 패널
+  const pl=$('photoLinks');
+  if(pl){
+    if(items.length){
+      pl.style.display='block';
+      pl.innerHTML='<b style="color:var(--water-deep)">📷 저장된 사진 링크</b>'
+        +'<div style="margin-top:6px;display:grid;grid-template-columns:1fr;gap:4px">'
+        +items.map(it=>`<a href="${it.url}" target="_blank" rel="noopener" style="color:var(--water);text-decoration:none;word-break:break-all">· ${it.label} →</a>`).join('')
+        +'</div>';
+    } else {
+      pl.style.display='none';
+    }
+  }
 }
 
 async function save(){
@@ -1155,6 +1223,8 @@ async function save(){
     if(j.phones&&j.phones.length){ data.phones=j.phones; $('smsBtn').style.display='block'; }
     busyDone('✓ 시트 기록 완료'+(j.mailed?' · 메일 '+j.mailed+'명 발송':''));
     $('saveBtn').textContent='✓ 시트 기록'+(j.mailed?' + 메일 '+j.mailed+'명 발송':'')+' 완료';
+    // 저장 후 사진 URL을 결과에 노출 (공유 문구·클릭 링크 모두)
+    applyPhotoLinks(j.urls||{});
     // 폼 정리 후 시트에서 재수신 (이전 검침·기록·사진 링크가 새로 반영됨)
     imgs={};
     ['bill','f1','f2','f3'].forEach(sl=>{ const el=$('pv-'+sl); if(el) el.innerHTML=''; });
@@ -1641,17 +1711,58 @@ function resetCfg(){
   location.reload();
 }
 
-function sendSms(){
-  const phones=(data.phones||[]).map(p=>p.replace(/[^0-9+]/g,'')).filter(Boolean);
-  if(!phones.length){
-    alert('구성원 전화번호가 없습니다.\n구글 시트의 "구성원" 탭에 이름과 전화번호를 먼저 등록해 주세요.');
+function collectSmsRecipients(){
+  // 관리자 인증된 상태면 members에서 이름+번호를 씀. 아니면 data.phones만 사용
+  const list=[];
+  if(data.members&&data.members.length){
+    data.members.forEach(m=>{
+      const raw=String(m.phone||'').replace(/[^0-9+]/g,'');
+      if(raw) list.push({name:m.name||'(이름 없음)',phone:raw,raw:m.phone||''});
+    });
+  } else if(data.phones&&data.phones.length){
+    data.phones.forEach(p=>{
+      const raw=String(p||'').replace(/[^0-9+]/g,'');
+      if(raw) list.push({name:'',phone:raw,raw:p});
+    });
+  }
+  return list;
+}
+const APP_URL='https://leesungwook3165.github.io/sudo_cal/';
+function openSmsPreview(){
+  const recipients=collectSmsRecipients();
+  if(!recipients.length){
+    alert('구성원 전화번호가 없습니다.\n구성원 관리에서 전화번호를 먼저 등록해 주세요.');
     return;
   }
   let body=$('copybox').textContent;
   if(data.account) body+='\n입금 계좌: '+data.account+(data.accountOwner?' ('+data.accountOwner+')':'');
+  body+='\n\n📱 상세 확인: '+APP_URL;
+  const toBox=$('smsTo');
+  toBox.innerHTML=recipients.map(r=>{
+    const label=(r.name?esc_(r.name)+' ':'')+esc_(r.raw||r.phone);
+    return `<span class="r-item">${label}</span>`;
+  }).join('')+`<div class="hint" style="margin-top:6px">총 ${recipients.length}명에게 전송됩니다</div>`;
+  const ta=$('smsBody');
+  ta.value=body;
+  updateSmsLen();
+  ta.oninput=updateSmsLen;
+  $('smsModal').classList.add('on');
+}
+function updateSmsLen(){
+  const v=$('smsBody').value||'';
+  const bytes=(new TextEncoder()).encode(v).length;
+  $('smsLen').textContent=v.length+'자 · '+bytes+' 바이트 (한글 90바이트 이상은 MMS로 전환됩니다)';
+}
+function closeSmsPreview(){ $('smsModal').classList.remove('on'); }
+function confirmSendSms(){
+  const recipients=collectSmsRecipients();
+  const phones=recipients.map(r=>r.phone).filter(Boolean);
+  if(!phones.length){ closeSmsPreview(); return; }
+  const body=$('smsBody').value||'';
   const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
   // iOS는 &body=, 안드로이드는 ?body= 를 사용
   const url='sms:'+phones.join(',')+(ios?'&':'?')+'body='+encodeURIComponent(body);
+  closeSmsPreview();
   location.href=url;
 }
 
