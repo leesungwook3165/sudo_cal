@@ -1,0 +1,1618 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>수도요금 층별 정산</title>
+<style>
+  :root{
+    --ink:#132A3D;        /* 진한 남색 글자 */
+    --sub:#5B7285;        /* 보조 글자 */
+    --line:#D5E0E8;       /* 경계선 */
+    --bg:#EDF3F7;         /* 옅은 물빛 배경 */
+    --card:#FFFFFF;
+    --water:#1B7FBF;      /* 물 파랑 */
+    --water-deep:#0F5E92;
+    --ok:#0E8C6F;
+    --warn:#B4552D;
+    --f1:#4E9DD3; --f2:#1B7FBF; --f3:#0F5E92; /* 층별 색 */
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  html{ -webkit-text-size-adjust:100% }
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif;
+    background:var(--bg); color:var(--ink);
+    padding:16px 14px 60px; max-width:560px; margin:0 auto;
+    font-size:15px; line-height:1.5;
+  }
+  /* 넓은 화면: 카드 정렬 — ①↔추이, ②↔기록 같은 행(같은 높이) */
+  @media(min-width:960px){
+    body{ max-width:1120px }
+    .layout{ display:grid; grid-template-columns:1fr 1.1fr; gap:16px; align-items:start;
+      grid-template-areas:"a d" "a e" "c e"; margin-top:14px }
+    .layout>.card{ margin-top:0 }
+    .g-a{grid-area:a}.g-b{grid-area:b}.g-c{grid-area:c}.g-d{grid-area:d}.g-e{grid-area:e}.g-f{grid-area:f}
+    body.viewer .layout{ grid-template-areas:"v v" "d e" }
+    .g-v{ grid-area:v }
+  }
+  /* 뷰어(가족 조회) 모드: 입력·수정 UI 숨김, 요약 카드 표시 */
+  body.viewer .admin-only{ display:none !important }
+  .viewer-only{ display:none }
+  body.viewer .viewer-only{ display:block }
+  .vgrid{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:12px }
+  .vcell{ background:#F4F8FB; border:1px solid var(--line); border-radius:11px; text-align:center; padding:14px 6px }
+  .vcell span{ font-size:12px; color:var(--sub) }
+  .vcell b{ display:block; font-size:19px; margin:3px 0; font-variant-numeric:tabular-nums }
+  .vcell small{ font-size:11.5px; color:var(--sub) }
+  /* 그래프 영역 고정 높이 — 기록이 없어도 좌우 균형 유지 */
+  #chart{ min-height:320px; display:flex; flex-direction:column; justify-content:center }
+  #chart .empty{ padding:0 }
+  /* 우측 상단 관리자 잠금 버튼 */
+  #lockBtn{ position:fixed; top:12px; right:12px; z-index:60; border:1.5px solid var(--line);
+    background:#fff; border-radius:20px; padding:7px 14px; font-size:13px; font-weight:700;
+    color:var(--water-deep); cursor:pointer; box-shadow:0 2px 8px rgba(19,42,61,.08) }
+  #adminPanel{ display:none; position:fixed; top:54px; right:12px; z-index:60; width:min(340px,92vw);
+    background:#fff; border:1.5px solid var(--line); border-radius:14px; padding:14px;
+    box-shadow:0 8px 24px rgba(19,42,61,.15) }
+  h1{ font-size:20px; letter-spacing:-.02em; display:flex; align-items:center; gap:8px }
+  h1 .drop{ font-size:22px }
+  .period{ color:var(--sub); font-size:13px; margin-top:2px }
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:16px; margin-top:14px;
+  }
+  .card h2{ font-size:14px; color:var(--water-deep); letter-spacing:-.01em; margin-bottom:10px }
+  label{ display:block; font-size:12.5px; color:var(--sub); margin-bottom:4px }
+  input[type=number], input[type=text], input[type=date]{
+    width:100%; padding:11px 12px; font-size:17px; font-variant-numeric:tabular-nums;
+    border:1.5px solid var(--line); border-radius:10px; color:var(--ink); background:#FBFDFE;
+  }
+  input:focus{ outline:2px solid var(--water); outline-offset:1px; border-color:var(--water) }
+  .row{ display:flex; gap:10px }
+  .row > div{ flex:1 }
+  .floor-grid{ display:grid; grid-template-columns:52px 1fr 1fr 64px; gap:8px; align-items:end; margin-bottom:10px }
+  .floor-name{ font-weight:700; padding-bottom:12px; color:var(--ink) }
+  .hint{ font-size:12px; color:var(--sub); margin-top:6px }
+  .btn{
+    display:block; width:100%; padding:14px; border:none; border-radius:12px;
+    font-size:16px; font-weight:700; cursor:pointer; margin-top:14px;
+    background:var(--water); color:#fff;
+  }
+  .btn:active{ background:var(--water-deep) }
+  .btn.ghost{ background:#fff; color:var(--water-deep); border:1.5px solid var(--line); font-weight:600; font-size:14px; padding:11px }
+  /* 결과 */
+  #result{ display:none }
+  .pipe{
+    display:flex; height:34px; border-radius:9px; overflow:hidden; margin:8px 0 4px;
+    border:1px solid var(--line);
+  }
+  .pipe div{ display:flex; align-items:center; justify-content:center; color:#fff; font-size:12.5px; font-weight:700; min-width:34px }
+  table{ width:100%; border-collapse:collapse; margin-top:10px; font-variant-numeric:tabular-nums }
+  th{ font-size:12px; color:var(--sub); font-weight:600; text-align:right; padding:6px 4px; border-bottom:1px solid var(--line) }
+  th:first-child, td:first-child{ text-align:left }
+  td{ padding:9px 4px; text-align:right; border-bottom:1px solid #EDF2F6; font-size:14.5px }
+  td.amt{ font-weight:700; font-size:16px }
+  .dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:1px }
+  .diff-plus{ color:var(--warn); font-size:12.5px }
+  .diff-minus{ color:var(--ok); font-size:12.5px }
+  .note{ font-size:12.5px; color:var(--sub); margin-top:10px }
+  .copybox{
+    margin-top:10px; background:#F4F8FB; border:1px dashed var(--line); border-radius:10px;
+    padding:12px; font-size:13.5px; white-space:pre-wrap; line-height:1.7;
+  }
+  /* 기록 */
+  .hist-item{ padding:10px 2px; border-bottom:1px solid #EDF2F6; font-size:13.5px }
+  .hist-item b{ font-variant-numeric:tabular-nums }
+  .hist-date{ color:var(--sub); font-size:12px }
+  .empty{ color:var(--sub); font-size:13.5px; text-align:center; padding:10px 0 }
+  .badge{ display:inline-block; font-size:11.5px; color:var(--water-deep); background:#E3F0F9; border-radius:20px; padding:2px 9px; margin-left:6px; vertical-align:2px }
+  input[type=file]{ width:100%; font-size:13px; padding:9px; border:1.5px dashed var(--line); border-radius:10px; background:#FBFDFE; color:var(--sub) }
+  #imgPreview img, .hist-thumb{ height:64px; border-radius:8px; border:1px solid var(--line); margin-top:8px; cursor:pointer }
+  .hist-thumb{ margin-top:6px }
+  #imgModal{ display:none; position:fixed; inset:0; background:rgba(10,25,38,.85); z-index:50;
+    align-items:center; justify-content:center; padding:20px; flex-direction:column }
+  #imgModal img{ max-width:100%; max-height:82vh; border-radius:10px; background:#fff }
+  #imgModal .close{ color:#fff; font-size:14px; margin-top:14px; background:none; border:1px solid rgba(255,255,255,.5); border-radius:20px; padding:8px 20px; cursor:pointer }
+  #editBanner{ display:none; align-items:center; gap:8px; background:#FFF4E8; border:1.5px solid #F0C9A0;
+    border-radius:10px; padding:9px 12px; margin-bottom:10px; font-size:13.5px; font-weight:700; color:#9A5B1E }
+  #editBanner button{ margin-left:auto; border:1px solid #E0B285; background:#fff; color:#9A5B1E;
+    border-radius:8px; padding:4px 10px; font-size:12px; cursor:pointer }
+  .slot.drag{ border-color:var(--water); border-style:solid; background:#E3F0F9 }
+  .edit-btn{ margin-left:auto; border:1px solid var(--line); background:#fff; color:var(--water-deep);
+    border-radius:7px; padding:2px 9px; font-size:11.5px; cursor:pointer }
+  /* 월별 현황 그리드 */
+  .mnav{ display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:8px }
+  .mnav button{ border:1.5px solid var(--line); background:#fff; color:var(--water-deep); border-radius:8px; width:32px; height:32px; font-size:14px; cursor:pointer }
+  .mnav b{ font-size:15px; min-width:64px; text-align:center }
+  .mgrid{ display:grid; grid-template-columns:repeat(6,1fr); gap:6px; margin-bottom:12px }
+  .mcell{ padding:10px 0 8px; text-align:center; border-radius:9px; background:#EBF0F4; color:#9AAAB8; font-size:13px; font-weight:600 }
+  .mcell small{ display:block; font-size:9.5px; font-weight:500; margin-top:1px; color:inherit }
+  .mcell.on{ background:var(--water); color:#fff; cursor:pointer; font-weight:800 }
+  .mcell.on:active{ background:var(--water-deep) }
+  .mcell.mid{ background:#D9EAF6; color:var(--water-deep); cursor:pointer; font-weight:700; border:1px dashed var(--water) }
+  /* 월 상세 보기 모달 */
+  #monthModal{ display:none; position:fixed; inset:0; background:rgba(10,25,38,.55); z-index:45;
+    align-items:flex-start; justify-content:center; padding:24px 14px; overflow:auto }
+  .mm-card{ background:#fff; border-radius:14px; max-width:560px; width:100%; padding:16px 16px 18px;
+    box-shadow:0 12px 34px rgba(10,25,38,.25) }
+  .mm-head{ display:flex; align-items:center; margin-bottom:4px }
+  .mm-head b{ font-size:16px; color:var(--water-deep) }
+  .mm-head button{ margin-left:auto; border:1px solid var(--line); background:#fff; color:var(--sub);
+    border-radius:8px; width:30px; height:30px; font-size:14px; cursor:pointer }
+  .mm-sec{ border-top:1px solid #EDF2F6; padding-top:12px; margin-top:12px }
+  .mm-sec:first-child{ border-top:none; padding-top:4px; margin-top:4px }
+  .mm-sec>b{ font-size:14px; color:var(--water-deep) }
+  .mm-photos{ display:flex; gap:10px; flex-wrap:wrap; margin-top:8px }
+  .mem-row{ border:1px solid var(--line); border-radius:10px; padding:10px; margin-top:8px; background:#FBFDFE }
+  .mem-grid{ display:grid; grid-template-columns:1fr 76px 90px; gap:6px }
+  .mem-grid2{ display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px }
+  .mem-grid3{ display:flex; gap:10px; align-items:center; margin-top:6px; font-size:12.5px; color:var(--sub) }
+  .mem-row input,.mem-row select{ margin:0; padding:8px 9px; font-size:14px }
+  .hist-click{ cursor:pointer }
+  .hist-click:hover{ background:#F4F9FD; border-radius:8px }
+  .hist-item.flash{ background:#E3F0F9; border-radius:10px; transition:background 1.2s }
+  .extra-row{ border:1.5px dashed var(--line); border-radius:10px; padding:10px; margin-top:8px; background:#FBFDFE }
+  .extra-row .r1{ display:grid; grid-template-columns:1fr 110px 34px; gap:8px }
+  .extra-row .r2{ display:grid; grid-template-columns:104px 128px 1fr; gap:8px; margin-top:8px; align-items:center }
+  .extra-row input[type=month]{ padding:8px; font-size:13px; margin:0 }
+  .extra-row select{ width:100%; margin:0; padding:9px 8px; font-size:13.5px }
+  .extra-row input[type=file]{ border:none; padding:0; font-size:12px }
+  .extra-row .del{ border:none; background:#F1F5F8; color:var(--warn); border-radius:8px; font-size:15px; cursor:pointer }
+  .extra-row img{ height:44px; border-radius:6px; border:1px solid var(--line); margin-top:6px; cursor:pointer; display:block }
+  .photo-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:6px }
+  .slot{ border:1.5px dashed var(--line); border-radius:10px; padding:9px; background:#FBFDFE }
+  .slot b{ display:block; font-size:12.5px; color:var(--water-deep); margin-bottom:6px }
+  .slot input[type=file]{ border:none; padding:0; font-size:12px }
+  .slot img{ height:52px; border-radius:7px; border:1px solid var(--line); margin-top:6px; cursor:pointer; display:block }
+  /* 매월 중간 검침 */
+  .mid-grid{ display:grid; grid-template-columns:44px 1fr 1.1fr; gap:8px; align-items:center; margin-bottom:8px }
+  .mid-grid .floor-name{ padding-bottom:0 }
+  .mid-grid input[type=file]{ border:none; padding:0; font-size:12px }
+  .mid-grid img{ height:40px; border-radius:6px; border:1px solid var(--line); margin-top:4px; cursor:pointer; display:block }
+  input.invalid{ border-color:var(--warn); background:#FDF1EA; outline-color:var(--warn) }
+  #liveWarn{ display:none; font-size:12.5px; color:var(--warn); margin-top:6px; font-weight:600 }
+  .year-head{ font-size:13px; font-weight:800; color:var(--water-deep); background:#E3F0F9;
+    border-radius:8px; padding:5px 10px; margin-top:12px }
+  .month-tag{ display:inline-block; font-size:12px; font-weight:700; color:#fff; background:var(--water);
+    border-radius:6px; padding:1px 8px; margin-right:6px }
+  /* 진행 표시 */
+  #busyBar{ position:fixed; top:0; left:0; right:0; height:3px; background:#D8E6F0; display:none; z-index:80; overflow:hidden }
+  #busyBar .busy-fill{ width:35%; height:100%; background:var(--water); border-radius:3px; animation:busySlide 1.1s ease-in-out infinite }
+  @keyframes busySlide{ 0%{margin-left:-35%} 100%{margin-left:100%} }
+  #busyMsg{ display:none; position:fixed; top:10px; left:50%; transform:translateX(-50%); z-index:80;
+    background:var(--water-deep); color:#fff; font-size:12.5px; font-weight:600; padding:7px 14px;
+    border-radius:20px; box-shadow:0 4px 14px rgba(15,94,146,.3); max-width:88vw; text-align:center }
+  /* 현황 칩 */
+  .stats{ display:flex; gap:8px; flex-wrap:wrap; margin-top:10px }
+  .chip{ background:#fff; border:1px solid var(--line); border-radius:11px; padding:8px 12px; font-size:12px; color:var(--sub); flex:1; min-width:120px }
+  .chip b{ display:block; font-size:14px; color:var(--ink); margin-top:2px; font-variant-numeric:tabular-nums }
+  .seg{ display:inline-flex; border:1.5px solid var(--line); border-radius:9px; overflow:hidden; margin-left:auto }
+  .seg button{ border:none; background:#fff; color:var(--sub); font-size:12px; padding:5px 11px; cursor:pointer; font-weight:600 }
+  .seg button.on{ background:var(--water); color:#fff }
+  .card-head{ display:flex; align-items:center; gap:8px; margin-bottom:10px }
+  .card-head h2{ margin-bottom:0 }
+  select{ padding:6px 10px; font-size:13px; border:1.5px solid var(--line); border-radius:9px; background:#fff; color:var(--ink); margin-left:auto }
+  details summary{ cursor:pointer; font-size:13px; color:var(--sub); margin-top:8px }
+  .danger{ color:var(--warn); background:none; border:none; font-size:12.5px; text-decoration:underline; cursor:pointer; margin-top:10px }
+</style>
+
+<div id="busyBar"><div class="busy-fill"></div></div>
+<div id="busyMsg"></div>
+
+<h1><span class="drop">💧</span> 수도요금 층별 정산</h1>
+<div class="period" id="prevInfo">첫 사용입니다. 이전 검침값을 한 번만 입력해 주세요.</div>
+<div class="stats" id="statsRow"></div>
+
+<button id="lockBtn" onclick="toggleAdmin()">🔐 관리자</button>
+<div id="adminPanel">
+  <b style="font-size:14px;color:var(--water-deep)">🔐 관리자 설정</b>
+  <div style="margin-top:10px">
+    <label>Apps Script 웹 앱 URL</label>
+    <input type="text" id="hookUrl" placeholder="https://script.google.com/macros/s/…/exec">
+    <label style="margin-top:8px">관리자 키</label>
+    <input type="password" id="adminKey" placeholder="스크립트의 ADMIN_KEY와 동일하게">
+    <button class="btn ghost" onclick="saveHook()" id="hookBtn">저장하고 인증</button>
+    <div id="connStat" class="hint" style="margin-top:8px"></div>
+    <div class="hint">키가 맞아야 기록·수정이 가능합니다. URL·키는 이 브라우저에만 저장됩니다.</div>
+  </div>
+  <div class="admin-only" id="memberSec" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+    <b style="font-size:14px;color:var(--water-deep)">👥 구성원 관리</b>
+    <div class="hint" style="margin-top:4px">메일수신 Y인 사람에게 정산 메일이 가고, 전화번호는 문자 보내기에 쓰입니다. <b>관리자의 계좌</b>가 알림과 가족 화면에 입금 계좌로 표시됩니다.</div>
+    <div id="memberList" style="margin-top:8px"></div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn ghost" style="padding:9px" onclick="addMember()">＋ 구성원 추가</button>
+      <button class="btn" style="padding:9px" onclick="saveMembers()" id="memSaveBtn">구성원 저장</button>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+
+<!-- 가족(조회) 화면 전용: 최근 정산 요약 -->
+<div class="card g-v viewer-only" id="viewerCard"></div>
+
+<!-- ① 검침 & 정산 (통합) -->
+<div class="card g-a admin-only">
+  <h2>① 이번 달 검침 · 정산</h2>
+  <div id="editBanner">✏️ <span id="editLbl"></span><button onclick="cancelEdit()">수정 취소</button></div>
+  <div class="row">
+    <div>
+      <label>1️⃣ 검침 날짜 (매월 같은 날 권장)</label>
+      <input type="date" id="date" onchange="onDateChange()">
+    </div>
+  </div>
+
+  <div class="mid-grid" style="margin-top:12px;margin-bottom:2px">
+    <div></div>
+    <label style="margin:0">2️⃣ 계량기 숫자 (㎥)</label>
+    <label style="margin:0">계량기 사진</label>
+  </div>
+  <div class="mid-grid">
+    <div class="floor-name">1층</div>
+    <input type="number" id="c1" inputmode="decimal" step="any" oninput="liveCheck()">
+    <div><input type="file" accept="image/*" onchange="attachImg(this,'f1')"><div id="pv-f1"></div></div>
+  </div>
+  <div class="mid-grid">
+    <div class="floor-name">2층</div>
+    <input type="number" id="c2" inputmode="decimal" step="any" oninput="liveCheck()">
+    <div><input type="file" accept="image/*" onchange="attachImg(this,'f2')"><div id="pv-f2"></div></div>
+  </div>
+  <div class="mid-grid">
+    <div class="floor-name">3층</div>
+    <input type="number" id="c3" inputmode="decimal" step="any" oninput="liveCheck()">
+    <div><input type="file" accept="image/*" onchange="attachImg(this,'f3')"><div id="pv-f3"></div></div>
+  </div>
+  <div id="liveWarn"></div>
+
+  <div class="seg" id="modeSeg" style="display:flex;width:100%;margin:14px 0 0">
+    <button class="on" id="modeLog" onclick="setMode('log')" style="flex:1;padding:10px">📷 검침만 기록<br><span style="font-weight:400;font-size:11px">매월</span></button>
+    <button id="modeSettle" onclick="setMode('settle')" style="flex:1;padding:10px">🧾 고지서 정산<br><span style="font-weight:400;font-size:11px">고지서 온 달</span></button>
+  </div>
+
+  <div id="logPane">
+    <button class="btn ghost" id="midBtn" onclick="saveMid()">이번 달 검침 기록하기</button>
+    <div class="hint">고지서가 없는 달은 이 버튼만 누르면 끝. 기록은 그래프와 아래 목록에 쌓이고, 정산 금액에는 영향을 주지 않아요.</div>
+    <div id="midList"></div>
+  </div>
+
+  <div id="settlePane" style="display:none">
+    <div style="margin-top:12px">
+      <label>1️⃣ 정산 마감 검침 (고지서 구간의 끝)</label>
+      <select id="closeSel" onchange="onCloseSel()" style="width:100%;margin:0"></select>
+      <div class="hint">기본은 최신 검침이에요. 고지서가 늦게 와서 그 사이에 새 검침을 이미 했다면, 고지서 구간에 맞는 검침을 고르세요. 남는 사용량은 다음 정산으로 자동 이월됩니다.</div>
+    </div>
+    <div class="hint" id="periodHint" style="margin-top:6px"></div>
+    <div id="prevLine" class="hint" style="margin-top:4px"></div>
+    <div id="prevEdit" style="display:none;margin-top:6px;border:1.5px dashed var(--line);border-radius:10px;padding:10px;background:#FBFDFE">
+      <label>이전 검침값 (구간 시작 · 지난 정산 마감)</label>
+      <div class="row">
+        <div><label>1층</label><input type="number" id="p1" inputmode="decimal" step="any" oninput="liveCheck()"></div>
+        <div><label>2층</label><input type="number" id="p2" inputmode="decimal" step="any" oninput="liveCheck()"></div>
+        <div><label>3층</label><input type="number" id="p3" inputmode="decimal" step="any" oninput="liveCheck()"></div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label>2️⃣ 고지서 귀속월</label>
+        <div class="mnav" style="justify-content:flex-start;gap:8px;margin:0;padding-top:4px">
+          <button type="button" onclick="stepBillMonth(-1)">◀</button>
+          <b id="billMonthLbl" style="min-width:104px;font-size:16px"></b>
+          <button type="button" onclick="stepBillMonth(1)">▶</button>
+        </div>
+        <input type="month" id="billMonth" style="display:none">
+      </div>
+      <div>
+        <label>3️⃣ 총 고지금액 (원)</label>
+        <input type="number" id="total" inputmode="numeric" placeholder="예: 84300">
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <label>4️⃣ 수도요금 배분 방식 · 인원</label>
+      <select id="splitMode" onchange="onSplitMode()" style="width:100%;margin:0">
+        <option value="use">사용량 비율 (계량기 기준)</option>
+        <option value="ppl">인원수 비율 (전체)</option>
+        <option value="mix">혼합 — 층별로 지정</option>
+      </select>
+      <div id="mixRow" style="display:none;margin-top:8px">
+        <div class="row">
+          <div><label>1층</label><select id="fm1" style="width:100%;margin:0"><option value="use">사용량</option><option value="ppl">인원수</option></select></div>
+          <div><label>2층</label><select id="fm2" style="width:100%;margin:0"><option value="use">사용량</option><option value="ppl">인원수</option></select></div>
+          <div><label>3층</label><select id="fm3" style="width:100%;margin:0"><option value="use">사용량</option><option value="ppl">인원수</option></select></div>
+        </div>
+        <div class="hint">인원수로 지정한 층은 (총액 × 그 층 인원 ÷ 전체 인원)을 먼저 배정하고, 남은 금액을 나머지 층이 사용량 비율로 나눕니다.</div>
+      </div>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <div><label>1층 인원</label><input type="number" id="n1" inputmode="numeric" value="2"></div>
+      <div><label>2층 인원</label><input type="number" id="n2" inputmode="numeric" value="2"></div>
+      <div><label>3층 인원</label><input type="number" id="n3" inputmode="numeric" value="2"></div>
+    </div>
+    <div style="margin-top:12px">
+      <label>5️⃣ 추가 비용 (정화조 청소 등 · 선택)</label>
+      <div id="extraList"></div>
+      <button class="btn ghost" style="margin-top:6px;padding:9px" onclick="addExtra()">＋ 추가 비용 항목</button>
+      <div class="hint">추가 비용은 <b>층별 부담액에만 합산</b>되고, 수도 사용량 그래프에는 반영되지 않습니다.</div>
+    </div>
+    <div style="margin-top:12px">
+      <label>6️⃣ 고지서 사진 (선택)</label>
+      <div class="photo-grid" style="grid-template-columns:1fr">
+        <div class="slot"><b>📄 고지서</b><input type="file" accept="image/*" onchange="attachImg(this,'bill')"><div id="pv-bill"></div></div>
+      </div>
+      <div class="hint">계량기 사진은 위에서 이미 첨부했으니 고지서만 올리면 됩니다.</div>
+    </div>
+    <button class="btn" onclick="calc()">계산하기</button>
+  </div>
+</div>
+
+<!-- 결과 -->
+<div class="card g-c admin-only" id="result">
+  <h2>③ 정산 결과</h2>
+  <div class="pipe" id="pipe"></div>
+  <table>
+    <thead><tr><th>층</th><th>사용량</th><th>비율</th><th>부담액</th><th>인원수 방식 대비</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <div class="note" id="checkNote"></div>
+  <div class="copybox" id="copybox"></div>
+  <button class="btn ghost" onclick="copyText()">가족방에 붙여넣을 문구 복사</button>
+  <button class="btn ghost" id="smsBtn" style="display:none" onclick="sendSms()">📱 가족에게 문자 보내기</button>
+  <button class="btn" id="saveBtn" onclick="save()">이번 검침값 저장 (다음 정산 준비)</button>
+</div>
+
+<!-- 사용량 추이 -->
+<div class="card g-d">
+  <div class="card-head">
+    <h2>층별 사용량 추이</h2>
+    <div class="seg" id="rangeSeg">
+      <button class="on" onclick="setRange(12,this)">1년</button>
+      <button onclick="setRange(24,this)">2년</button>
+      <button onclick="setRange(0,this)">전체</button>
+    </div>
+  </div>
+  <div id="chart"><div class="empty">정산 기록이 2회 이상 쌓이면 그래프가 표시됩니다.</div></div>
+</div>
+
+<!-- 기록 -->
+<div class="card g-e">
+  <div class="card-head">
+    <h2>월별 현황 · 정산 기록</h2>
+    <select id="yearSel" onchange="renderHist()"><option value="all">전체 기간</option></select>
+  </div>
+  <div class="mnav">
+    <button onclick="moveGridYear(-1)">◀</button>
+    <b id="gridYearLbl"></b>
+    <button onclick="moveGridYear(1)">▶</button>
+  </div>
+  <div class="mgrid" id="mgrid"></div>
+  <div class="hint" style="margin:-6px 0 12px">색이 있는 달이나 아래 기록을 누르면 그 달의 정산 내역·고지서·계량기 사진을 한 번에 볼 수 있어요. (점선 달 = 검침만 있는 달)</div>
+  <div id="hist"><div class="empty">아직 저장된 기록이 없습니다.</div></div>
+  <div class="hint">모든 기록·사진은 구글 시트와 드라이브에 저장되며, 정산 저장 시마다 시트 사본이 "수도정산-백업" 폴더에 자동 보관됩니다. 기록 수정·삭제는 구글 시트에서 직접 할 수도 있어요.</div>
+  <details class="admin-only">
+    <summary>이 기기의 연동 설정 지우기</summary>
+    <button class="danger" onclick="resetCfg()">저장된 웹 앱 URL·관리자 키 지우기 (시트 기록은 그대로)</button>
+  </details>
+</div>
+
+<!-- 관리자 설정 (평소엔 접혀 있음) -->
+</div><!-- /layout -->
+
+<div id="monthModal" onclick="if(event.target===this)this.style.display='none'">
+  <div class="mm-card">
+    <div class="mm-head"><b id="mmTitle"></b><button onclick="document.getElementById('monthModal').style.display='none'">✕</button></div>
+    <div id="mmBody"></div>
+  </div>
+</div>
+
+<div id="imgModal" onclick="this.style.display='none'">
+  <div id="modalCap" style="color:#fff;font-size:14px;font-weight:700;margin-bottom:10px"></div>
+  <img id="modalImg" alt="고지서 사진">
+  <button class="close">닫기</button>
+</div>
+
+<script>
+/* ===== 저장 구조 =====
+ * 모든 기록·사진은 구글 시트/드라이브에만 저장됩니다 (시트 = 진실의 원본).
+ * 이 브라우저(localStorage)에는 연동 설정(웹 앱 URL·관리자 키)만 보관합니다. */
+const CFG_KEY='sudo-cfg';
+function loadCfg(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); }catch(e){ return {}; } }
+function saveCfg(){ try{ localStorage.setItem(CFG_KEY,JSON.stringify({hook:data.hook||'',key:data.key||''})); }catch(e){} }
+/* ★ GitHub에 올리기 전에 여기에 Apps Script 웹 앱 URL을 넣으세요.
+ *   가족(뷰어)은 이 주소로 기록을 '조회만' 할 수 있습니다.
+ *   기록·수정·전화번호 조회는 관리자 키가 있어야만 동작합니다. */
+const DEFAULT_HOOK='';
+
+let isAdmin=false;
+function setConnStat(kind){
+  const el=$('connStat'); if(!el) return;
+  const map={
+    none:  ['var(--sub)',       '⚪ 미연동 — 웹 앱 URL과 관리자 키를 입력해 주세요'],
+    busy:  ['var(--water-deep)','⏳ 구글 시트에 연결하는 중…'],
+    admin: ['var(--ok)',        '🟢 연동됨 · 관리자 인증 완료 — 기록·수정 가능'],
+    viewer:['var(--water-deep)','🔵 연동됨 · 조회 전용 (관리자 키 미인증)'],
+    badkey:['var(--warn)',      '🟠 시트 연결됨 · 관리자 키가 일치하지 않습니다'],
+    fail:  ['var(--warn)',      '🔴 연결 실패 — 인터넷 연결과 웹 앱 URL을 확인해 주세요']
+  };
+  const m=map[kind]||map.none;
+  el.style.color=m[0]; el.style.fontWeight='700'; el.textContent=m[1];
+}
+
+/* 가족(조회) 화면: 최근 정산 요약 카드 */
+function renderViewerSummary(){
+  const el=$('viewerCard'); if(!el) return;
+  const h=histSrc()[0];
+  if(!h){
+    el.innerHTML='<h2>💧 우리 건물 수도요금</h2><div class="empty">아직 정산 기록이 없습니다. 관리자가 첫 정산을 저장하면 여기에 표시됩니다.</div>';
+    return;
+  }
+  const bm=(h.billMonth||h.date.slice(0,7)).split('-');
+  const fin=h.finals||h.amt;
+  const sum=h.use.reduce((a,b)=>a+b,0);
+  const colors=['var(--f1)','var(--f2)','var(--f3)'];
+  const pipe=h.use.map((u,i)=>`<div style="flex:${u||0.0001};background:${colors[i]}">${i+1}층 ${Math.round(u/sum*100)}%</div>`).join('');
+  const hasX=h.extraSum>0;
+  el.innerHTML=`<h2>💧 ${+bm[1]}월분 수도요금 — 세대별 부담액</h2>
+    <div class="period">검침 구간 ${h.prevDate?h.prevDate+' → ':''}${h.date} · 총 ${won(h.total)}${hasX?' + 추가 '+won(h.extraSum):''} · ${t(sum)}㎥ · 배분: ${h.split||'사용량'}</div>
+    <div class="pipe" style="margin-top:10px">${pipe}</div>
+    <div class="vgrid">${[0,1,2].map(i=>
+      `<div class="vcell"><span>${i+1}층</span><b>${won(fin[i])}</b><small>${t(h.use[i])}㎥ 사용</small></div>`).join('')}</div>
+    ${data.account?`<div style="margin-top:12px;background:#EAF4EE;border:1px solid #CBE5D5;border-radius:10px;padding:10px 12px;font-size:13.5px">💳 입금 계좌: <b>${data.account}</b>${data.accountOwner?' ('+data.accountOwner+')':''}</div>`:''}
+    <div class="hint" style="margin-top:10px">검침값과 계량기·고지서 사진은 아래 <b>정산 기록</b>에서 확인할 수 있어요. 문의는 관리자(건물주)에게 연락해 주세요.</div>`;
+}
+
+function setAdmin(on){
+  isAdmin=on;
+  document.body.classList.toggle('viewer',!on);
+  $('lockBtn').textContent=on?'🔓 관리자 모드':'🔐 관리자';
+}
+async function toggleAdmin(){
+  if(isAdmin){ // 이미 관리자면 설정 패널 열고 닫기
+    const p=$('adminPanel');
+    p.style.display=p.style.display==='block'?'none':'block';
+    return;
+  }
+  const hook=data.hook||DEFAULT_HOOK;
+  if(!hook){ $('adminPanel').style.display='block'; return; } // URL부터 입력
+  const k=prompt('관리자 키를 입력하세요');
+  if(!k) return;
+  try{
+    const j=await (await fetch(hook+'?key='+encodeURIComponent(k))).json();
+    if(j&&j.admin===true){
+      data.key=k; data.hook=hook;
+      saveCfg();
+      if(j.phones&&j.phones.length) data.phones=j.phones;
+    if(j.members) { data.members=j.members; renderMembers(); }
+    data.account=j.account||''; data.accountOwner=j.accountOwner||'';
+      setAdmin(true);
+      alert('관리자 인증되었습니다.');
+      refresh();
+    }else{
+      alert('키가 올바르지 않습니다.');
+    }
+  }catch(e){ alert('인증 요청에 실패했습니다. 인터넷 연결을 확인해 주세요.'); }
+}
+let data={ prev:null, people:[2,2,2], hook:'', key:'', phones:[] };
+let lastCalc=null;
+let remoteHist=null;   // 시트에서 받아온 정산 기록 (진실의 원본)
+const histSrc=()=>remoteHist||[];
+let imgs={};   // {bill:{full,thumb}, f1:…, f2:…, f3:…}
+let remoteMids=null; // 시트에서 받아온 검침 기록 (매월)
+const midsSrc=()=>remoteMids||[];
+const SLOT_LABEL={bill:'고지서',f1:'1층 계량기',f2:'2층 계량기',f3:'3층 계량기',
+  m1:'1층 계량기(중간)',m2:'2층 계량기(중간)',m3:'3층 계량기(중간)'};
+
+/* 드라이브 링크 → 썸네일/원본 이미지 주소 */
+function driveId(url){ const m=String(url).match(/\/d\/([\w-]+)/)||String(url).match(/[?&]id=([\w-]+)/); return m?m[1]:null; }
+function driveThumb(url,w){ const id=driveId(url); return id?('https://drive.google.com/thumbnail?id='+id+'&sz=w'+(w||200)):null; }
+function showDrive(url,label){
+  if(!url||!/^https?:/.test(String(url))) return; // 빈 값·비정상 URL 무시 (file:// 로드 방지)
+  const big=driveThumb(url,1600);
+  if(!big){ window.open(url,'_blank'); return }
+  $('modalCap').textContent=label+' (구글 드라이브)';
+  $('modalImg').src=big;
+  $('imgModal').style.display='flex';
+}
+
+function compress(file,maxDim,quality){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const s=Math.min(1,maxDim/Math.max(img.width,img.height));
+        const cv=document.createElement('canvas');
+        cv.width=Math.round(img.width*s); cv.height=Math.round(img.height*s);
+        cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+        res(cv.toDataURL('image/jpeg',quality));
+      };
+      img.onerror=rej; img.src=r.result;
+    };
+    r.onerror=rej; r.readAsDataURL(file);
+  });
+}
+
+async function attachImg(input,slot){
+  const f=input.files[0];
+  if(!f) return;
+  $('pv-'+slot).innerHTML='<div class="hint">📸 사진 압축 중…</div>';
+  try{
+    imgs[slot]={
+      full:await compress(f,1300,0.72),
+      thumb:await compress(f,140,0.6)
+    };
+    $('pv-'+slot).innerHTML=`<img src="${imgs[slot].thumb}" onclick="showLive('${slot}')" alt="${SLOT_LABEL[slot]} 미리보기">`;
+  }catch(e){ $('pv-'+slot).innerHTML=''; alert('사진을 읽지 못했습니다. 다른 사진으로 시도해 주세요.'); }
+}
+
+function showLive(slot){
+  if(!imgs[slot]) return;
+  $('modalCap').textContent=SLOT_LABEL[slot]+' (저장 전 미리보기)';
+  $('modalImg').src=imgs[slot].full;
+  $('imgModal').style.display='flex';
+}
+
+
+const $=id=>document.getElementById(id);
+
+/* ── 진행 표시 ── */
+let busyTimer=null;
+function busy(msg){
+  clearTimeout(busyTimer);
+  $('busyBar').style.display='block';
+  const m=$('busyMsg'); m.textContent=msg; m.style.display='block';
+}
+function busyDone(msg){
+  $('busyBar').style.display='none';
+  const m=$('busyMsg');
+  if(msg){ m.textContent=msg; clearTimeout(busyTimer); busyTimer=setTimeout(()=>m.style.display='none',2200); }
+  else m.style.display='none';
+}
+
+/* ── 상단 현황 칩 ── */
+function renderStats(){
+  const el=$('statsRow'); if(!el) return;
+  const pts=readingPoints();
+  const last=pts.length?pts[pts.length-1]:null;
+  const today=new Date();
+  const dstr=d=>{const p=String(d).split('-');return (+p[1])+'/'+(+p[2]);};
+  const chips=[];
+  if(last){
+    const days=Math.round((today-new Date(last.date))/86400000);
+    chips.push(`<div class="chip">📷 마지막 검침<b>${dstr(last.date)} <span style="font-weight:400;font-size:11.5px;color:var(--sub)">(${days<=0?'오늘':days+'일 전'})</span></b></div>`);
+    const nd=new Date(last.date+'T00:00:00'); nd.setMonth(nd.getMonth()+1);
+    const nds=nd.getFullYear()+'-'+String(nd.getMonth()+1).padStart(2,'0')+'-'+String(nd.getDate()).padStart(2,'0');
+    const due=Math.ceil((nd-today)/86400000);
+    chips.push(`<div class="chip">⏰ 다음 검침 권장<b>${dstr(nds)} <span style="font-weight:400;font-size:11.5px;color:${due<0?'var(--warn)':'var(--sub)'}">(${due<0?(-due)+'일 지남':due===0?'오늘':'D-'+due})</span></b></div>`);
+  }else{
+    chips.push('<div class="chip">📷 마지막 검침<b>아직 없음</b></div>');
+  }
+  const h=histSrc()[0];
+  if(h){
+    const bm=(h.billMonth||h.date.slice(0,7)).split('-');
+    chips.push(`<div class="chip">🧾 마지막 정산<b>${+bm[1]}월분 · ${dstr(h.date)} 마감</b></div>`);
+  }else{
+    chips.push('<div class="chip">🧾 마지막 정산<b>아직 없음</b></div>');
+  }
+  const linked=!!(data.hook||DEFAULT_HOOK);
+  chips.push(`<div class="chip">☁ 구글 시트<b>${linked?((remoteHist||remoteMids)?'연동 · 동기화됨':'연동됨'):'미연동 — 설정 필요'}</b></div>`);
+  el.innerHTML=chips.join('');
+}
+const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
+const t=n=>(Math.round(n*10)/10).toLocaleString('ko-KR');
+
+async function load(){
+  $('date').value=new Date().toISOString().slice(0,10);
+  $('billMonth').value=$('date').value.slice(0,7);
+  const c=loadCfg();
+  data.hook=c.hook||DEFAULT_HOOK;
+  data.key=c.key||'';
+  $('hookUrl').value=data.hook;
+  $('adminKey').value=data.key;
+  if(!data.hook){
+    setAdmin(false);
+    setConnStat('none');
+    $('adminPanel').style.display='block';
+    $('prevInfo').textContent='이 앱은 구글 시트에 기록을 저장합니다. 우측 상단 🔐 관리자에서 웹 앱 URL과 키를 먼저 설정해 주세요.';
+    renderHist();
+    updateMeterLabels(); updatePeriod();
+    return;
+  }
+  await refresh(true);
+  if(data.people) [1,2,3].forEach(i=>$('n'+i).value=data.people[i-1]);
+  updateMeterLabels();
+  // 최신 검침점이 지난 정산 이후 것이면 '이번 검침'에 자동 반영
+  const _pts=readingPoints();
+  const _last=_pts.length?_pts[_pts.length-1]:null;
+  if(_last&&(!data.prev||_last.date>data.prev.date)){
+    [1,2,3].forEach(i=>{ if($('c'+i).value==='') $('c'+i).value=_last.r[i-1]; });
+    $('date').value=_last.date;
+    if(!billMonthManual) $('billMonth').value=_last.date.slice(0,7);
+  }
+  updatePeriod();
+  renderHist();
+}
+
+/* 구글 시트에서 전체 기록 재수신 (시트 = 진실의 원본) */
+async function refresh(initial){
+  busy(initial?'구글 시트에서 기록을 불러오는 중…':'구글 시트와 동기화하는 중…');
+  setConnStat('busy');
+  try{
+    const j=await (await fetch(data.hook+'?key='+encodeURIComponent(data.key||''))).json();
+    if(!j||!j.ok) throw new Error(j&&j.error||'응답 오류');
+    setAdmin(j.admin===true);
+    setConnStat(j.admin===true?'admin':(data.key?'badkey':'viewer'));
+    remoteHist=(j.history||[]).map(h=>Object.assign({},h,{
+      date:normDate(h.date),
+      prevDate:normDate(h.prevDate),
+      billMonth:normYm(h.billMonth)||normDate(h.date).slice(0,7)
+    })).filter(h=>h.date&&h.use&&h.use.length===3);
+    remoteMids=(j.mids||[]).map(m=>Object.assign({},m,{date:normDate(m.date)}))
+      .filter(m=>m.date&&m.readings&&m.readings.length===3);
+    if(j.prev&&j.prev.readings){
+      data.prev={readings:j.prev.readings,date:formatSheetDate(j.prev.date)};
+      [1,2,3].forEach(i=>$('p'+i).value=j.prev.readings[i-1]);
+      $('prevInfo').textContent='이전 검침: '+data.prev.date+' 기준 (구글 시트 동기화)';
+    }else{
+      data.prev=null;
+      $('prevInfo').textContent='첫 사용입니다. 이전 검침값(기준 시작값)을 한 번만 입력해 주세요.';
+    }
+    if(j.phones&&j.phones.length) data.phones=j.phones;
+    if(j.members) { data.members=j.members; renderMembers(); }
+    data.account=j.account||''; data.accountOwner=j.accountOwner||'';
+    busyDone(initial?'✓ 시트 불러오기 완료':'✓ 동기화 완료');
+    renderHist();
+    updateMeterLabels(); renderCloseSel();
+    return true;
+  }catch(e){
+    busyDone('⚠ 구글 시트에 연결하지 못했습니다');
+    setConnStat('fail');
+    $('prevInfo').textContent='구글 시트 연결 실패 — 인터넷 연결과 웹 앱 URL을 확인해 주세요. (Claude 미리보기 안에서는 외부 연결이 차단되어, 파일을 직접 열어야 동작합니다)';
+    renderHist();
+    return false;
+  }
+}
+function normDate(d){
+  const m=String(d==null?'':d).match(/(\d{4})\D+?(\d{1,2})\D+?(\d{1,2})/);
+  if(m) return m[1]+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[3]).padStart(2,'0');
+  const t=new Date(d); return isNaN(t)?'':t.toISOString().slice(0,10);
+}
+function normYm(d){
+  const m=String(d==null?'':d).match(/(\d{4})\D+?(\d{1,2})/);
+  return m?m[1]+'-'+String(+m[2]).padStart(2,'0'):'';
+}
+function formatSheetDate(d){ return normDate(d); }
+
+/* ── 추가 비용 (수도 그래프와 무관, 금액 정산에만 합산) ── */
+function addExtra(){
+  const div=document.createElement('div');
+  div.className='extra-row';
+  div.innerHTML=`
+    <div class="r1">
+      <input type="text" class="x-name" placeholder="항목명 (예: 정화조 청소)">
+      <input type="number" class="x-amt" inputmode="numeric" placeholder="금액(원)">
+      <button class="del" onclick="this.closest('.extra-row').remove()">✕</button>
+    </div>
+    <div class="r2">
+      <select class="x-mode">
+        <option value="eq">균등 3등분</option>
+        <option value="use">사용량 비율</option>
+        <option value="ppl">인원수 비율</option>
+      </select>
+      <input type="month" class="x-month" title="이 비용의 귀속월">
+      <input type="file" accept="image/*" onchange="attachExtra(this)">
+    </div>
+    <div class="x-pv"></div>`;
+  $('extraList').appendChild(div);
+  div.querySelector('.x-month').value=$('billMonth').value||new Date().toISOString().slice(0,7);
+  enableDrop(div,div.querySelector('input[type=file]'));
+}
+
+async function attachExtra(input){
+  const f=input.files[0]; if(!f) return;
+  const row=input.closest('.extra-row');
+  try{
+    row._img={ full:await compress(f,1300,0.72), thumb:await compress(f,140,0.6) };
+    const pv=row.querySelector('.x-pv');
+    pv.innerHTML=`<img src="${row._img.thumb}" alt="증빙 미리보기">`;
+    pv.querySelector('img').onclick=()=>{
+      $('modalCap').textContent=(row.querySelector('.x-name').value||'추가 비용')+' 증빙 (저장 전 미리보기)';
+      $('modalImg').src=row._img.full; $('imgModal').style.display='flex';
+    };
+  }catch(e){ alert('사진을 읽지 못했습니다.'); }
+}
+
+function readExtras(){
+  return [...document.querySelectorAll('.extra-row')].map(r=>({
+    name:r.querySelector('.x-name').value.trim()||'추가 비용',
+    amt:Math.round(+r.querySelector('.x-amt').value||0),
+    mode:r.querySelector('.x-mode').value,
+    month:r.querySelector('.x-month').value||$('billMonth').value,
+    img:r._img||null
+  })).filter(x=>x.amt>0);
+}
+
+/* 금액을 가중치 비율로 10원 단위 배분 (마지막 층 오차 보정) */
+function split10(total,w){
+  const W=w.reduce((a,b)=>a+b,0);
+  if(W<=0){ const e=Math.round(total/3/10)*10; return [e,e,total-2*e]; }
+  const out=w.map(x=>Math.round(total*x/W/10)*10);
+  out[2]=total-out[0]-out[1];
+  return out;
+}
+
+let billMonthManual=false; // 사용자가 귀속월을 직접 고쳤는지
+function onDateChange(){
+  updateMeterLabels();
+  updatePeriod();
+  if(!billMonthManual) $('billMonth').value=$('date').value.slice(0,7);
+}
+
+/* 정산 구간 표시 + 역전 검사 (이전 검침일은 항상 지난 정산 마감일) */
+function updatePeriod(){
+  renderBillMonthLbl();
+  const box=$('periodHint'); if(!box) return;
+  const p=editing&&editing.prevDate!==undefined?editing.prevDate:(data.prev?data.prev.date:null);
+  const c=$('date').value;
+  box.style.color='var(--sub)'; box.style.fontWeight='400';
+  if(!p||!c){ box.textContent=p?'':'첫 정산입니다. 이번에 저장하면 다음부터 구간이 자동으로 이어집니다.'; return }
+  const days=Math.round((new Date(c)-new Date(p))/86400000);
+  if(days===0){
+    box.textContent='이 날짜('+p+')로 정산이 마감된 상태입니다. 다음 정산은 이후 날짜의 검침으로 진행하세요.';
+    return;
+  }
+  if(days<0){
+    box.style.color='var(--warn)'; box.style.fontWeight='700';
+    box.textContent='⚠ 검침일이 지난 정산 마감일('+p+')보다 늦어야 합니다 — 구간이 겹칩니다.';
+    return;
+  }
+  box.textContent='이번 정산 구간: '+p+' → '+c+' ('+days+'일) · 지난 마감에서 빈틈없이 이어집니다';
+}
+
+function onSplitMode(){
+  $('mixRow').style.display=$('splitMode').value==='mix'?'block':'none';
+}
+
+/* ── 모드: 검침만 기록 ↔ 고지서 정산 ── */
+let mode='log';
+function setMode(m){
+  mode=m;
+  $('modeLog').classList.toggle('on',m==='log');
+  $('modeSettle').classList.toggle('on',m==='settle');
+  $('logPane').style.display=m==='log'?'block':'none';
+  $('settlePane').style.display=m==='settle'?'block':'none';
+  if(m==='settle'){ renderCloseSel(); updatePeriod(); }
+}
+
+/* 귀속월 스테퍼 */
+function renderBillMonthLbl(){
+  const el=$('billMonthLbl'); if(!el) return;
+  const v=$('billMonth').value;
+  if(!v){ el.textContent='—'; return }
+  const [y,m]=v.split('-');
+  el.textContent=y+'년 '+(+m)+'월분';
+}
+function stepBillMonth(d){
+  let v=$('billMonth').value||new Date().toISOString().slice(0,7);
+  let [y,m]=v.split('-').map(Number);
+  m+=d; if(m<1){m=12;y--;} if(m>12){m=1;y++;}
+  $('billMonth').value=y+'-'+String(m).padStart(2,'0');
+  billMonthManual=true;
+  renderBillMonthLbl();
+}
+
+/* 정산 마감 검침 선택 — 지난 마감 이후의 검침점 중에서 고름 */
+function renderCloseSel(){
+  const sel=$('closeSel'); if(!sel) return;
+  const base=editing&&editing.prevDate!==undefined?editing.prevDate:(data.prev?data.prev.date:null);
+  const pts=readingPoints().filter(p=>!base||p.date>base).slice(-8).reverse();
+  const cur=$('date').value;
+  sel.innerHTML=pts.map(p=>`<option value="${p.date}">${p.date} 검침 (${p.r.map(t).join(' / ')}㎥)</option>`).join('')
+    +'<option value="">직접 입력 (위 칸의 값 그대로)</option>';
+  sel.value=pts.some(p=>p.date===cur)?cur:'';
+}
+function onCloseSel(){
+  const d=$('closeSel').value; if(!d) return;
+  const p=readingPoints().find(x=>x.date===d); if(!p) return;
+  $('date').value=d;
+  [1,2,3].forEach(i=>$('c'+i).value=p.r[i-1]);
+  if(!billMonthManual) $('billMonth').value=d.slice(0,7);
+  updateMeterLabels(); updatePeriod(); liveCheck();
+}
+
+/* 이전 검침(지난 정산 마감) 표시줄 */
+function togglePrevEdit(){
+  const el=$('prevEdit');
+  el.style.display=el.style.display==='block'?'none':'block';
+}
+function renderPrevLine(){
+  const el=$('prevLine'); if(!el) return;
+  const pd=editing&&editing.prevDate!==undefined?editing.prevDate:(data.prev?data.prev.date:null);
+  const vals=[1,2,3].map(i=>$('p'+i).value);
+  if(vals.every(v=>v!=='')){
+    el.innerHTML='이전 검침(구간 시작): <b>'+(pd||'날짜 미상')+'</b> · '
+      +vals.map(v=>t(+v)).join(' / ')+'㎥ — 지난 정산 마감값 자동 적용 '
+      +'<button class="edit-btn" style="margin-left:6px" onclick="togglePrevEdit()">직접 수정</button>';
+    if(!editing&&$('prevEdit').style.display!=='block') $('prevEdit').style.display='none';
+  }else{
+    el.innerHTML='<span style="color:var(--warn);font-weight:700">첫 사용: 아래에 이전 검침값(기준 시작값)을 한 번만 입력해 주세요. 정산만 해당되고, 검침 기록에는 필요 없어요.</span>';
+    $('prevEdit').style.display='block';
+  }
+}
+
+function updateMeterLabels(){ renderPrevLine(); }
+
+/* ── 구성원 관리 (관리자 전용) ── */
+function renderMembers(){
+  const box=$('memberList'); if(!box) return;
+  const list=data.members||[];
+  if(!list.length){ box.innerHTML='<div class="hint">등록된 구성원이 없습니다. ＋ 구성원 추가를 눌러 시작하세요.</div>'; return }
+  box.innerHTML=list.map((m,i)=>`<div class="mem-row">
+    <div class="mem-grid">
+      <input placeholder="이름" value="${(m.name||'').replace(/"/g,'&quot;')}" oninput="data.members[${i}].name=this.value">
+      <select onchange="data.members[${i}].floor=this.value">
+        ${['','1층','2층','3층'].map(f=>`<option value="${f}" ${(m.floor||'')===f?'selected':''}>${f||'층'}</option>`).join('')}
+      </select>
+      <select onchange="data.members[${i}].role=this.value">
+        <option value="구성원" ${m.role!=='관리자'?'selected':''}>구성원</option>
+        <option value="관리자" ${m.role==='관리자'?'selected':''}>관리자</option>
+      </select>
+    </div>
+    <div class="mem-grid2">
+      <input placeholder="이메일" value="${(m.email||'').replace(/"/g,'&quot;')}" oninput="data.members[${i}].email=this.value">
+      <input placeholder="전화번호 (010-…)" value="${(m.phone||'').replace(/"/g,'&quot;')}" oninput="data.members[${i}].phone=this.value">
+    </div>
+    <div class="mem-grid2">
+      <input placeholder="계좌 (예: 국민 000-00-000000)" value="${(m.account||'').replace(/"/g,'&quot;')}" oninput="data.members[${i}].account=this.value">
+      <div class="mem-grid3">
+        <label style="margin:0;display:flex;align-items:center;gap:5px;font-size:12.5px">
+          <input type="checkbox" style="width:auto;margin:0" ${m.mail?'checked':''} onchange="data.members[${i}].mail=this.checked"> 메일수신
+        </label>
+        <button class="edit-btn" style="margin-left:auto" onclick="removeMember(${i})">삭제</button>
+      </div>
+    </div>
+  </div>`).join('');
+}
+function addMember(){
+  if(!data.members) data.members=[];
+  data.members.push({name:'',floor:'',email:'',phone:'',mail:true,role:'구성원',account:''});
+  renderMembers();
+}
+function removeMember(i){
+  if(!confirm((data.members[i].name||'이 구성원')+' 을(를) 목록에서 뺄까요? (구성원 저장을 눌러야 시트에 반영됩니다)')) return;
+  data.members.splice(i,1);
+  renderMembers();
+}
+async function saveMembers(){
+  if(!data.hook||!data.key||!isAdmin){ alert('관리자 인증이 필요합니다.'); return }
+  const bad=(data.members||[]).find(m=>m.name&&m.email&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m.email));
+  if(bad&&!confirm(bad.name+'의 이메일 형식이 이상해 보입니다. 그래도 저장할까요?')) return;
+  busy('구성원 명단을 시트에 저장하는 중…');
+  $('memSaveBtn').textContent='☁ 저장 중…';
+  try{
+    const j=await (await fetch(data.hook,{method:'POST',body:JSON.stringify({key:data.key,kind:'members',members:data.members||[]})})).json();
+    if(!j||!j.ok) throw new Error(j&&j.error||'저장 실패');
+    data.members=j.members||data.members;
+    busyDone('✓ 구성원 '+(j.count||0)+'명 저장 완료');
+    $('memSaveBtn').textContent='✓ 저장 완료';
+    renderMembers();
+    refresh(); // 계좌·전화번호 반영
+  }catch(e){
+    busyDone();
+    alert('구성원 저장에 실패했습니다. 인터넷 연결을 확인해 주세요.');
+    $('memSaveBtn').textContent='구성원 저장';
+    return;
+  }
+  setTimeout(()=>$('memSaveBtn').textContent='구성원 저장',2500);
+}
+
+/* 수도요금 배분 계산 — 방식에 따라 층별 금액과 방식 라벨 반환 */
+function splitWater(total,use,ppl){
+  const mode=$('splitMode').value;
+  const pplSum=ppl.reduce((a,b)=>a+b,0);
+  if(mode==='ppl'){
+    if(pplSum<=0) return {err:'인원수 비율 배분을 쓰려면 각 층 인원을 입력해 주세요.'};
+    return {amt:split10(total,ppl),label:'인원수'};
+  }
+  if(mode==='mix'){
+    const fm=[$('fm1').value,$('fm2').value,$('fm3').value];
+    const pplIdx=[0,1,2].filter(i=>fm[i]==='ppl');
+    const useIdx=[0,1,2].filter(i=>fm[i]==='use');
+    if(!pplIdx.length) return {amt:split10(total,use),label:'사용량'};
+    if(pplSum<=0) return {err:'인원수 지정 층이 있으면 각 층 인원을 입력해 주세요.'};
+    if(!useIdx.length) return {amt:split10(total,ppl),label:'인원수'};
+    const amt=[0,0,0];
+    let assigned=0;
+    pplIdx.forEach(i=>{ amt[i]=Math.round(total*ppl[i]/pplSum/10)*10; assigned+=amt[i]; });
+    let rem=total-assigned;
+    if(rem<0){ amt[pplIdx[pplIdx.length-1]]+=rem; rem=0; }
+    // 남은 금액을 사용량 비율로
+    const w=useIdx.map(i=>use[i]);
+    const W=w.reduce((a,b)=>a+b,0);
+    let acc=0;
+    useIdx.forEach((fi,k)=>{
+      if(k===useIdx.length-1){ amt[fi]=rem-acc; }
+      else{ amt[fi]=W>0?Math.round(rem*use[fi]/W/10)*10:Math.round(rem/useIdx.length/10)*10; acc+=amt[fi]; }
+    });
+    return {amt,label:'혼합('+pplIdx.map(i=>(i+1)+'층 인원수').join(', ')+')'};
+  }
+  return {amt:split10(total,use),label:'사용량'};
+}
+
+function liveCheck(){
+  const msgs=[];
+  for(let i=1;i<=3;i++){
+    const p=$('p'+i), c=$('c'+i);
+    c.classList.remove('invalid');
+    if(p.value!==''&&c.value!==''){
+      const diff=+c.value-+p.value;
+      if(diff<0){
+        c.classList.add('invalid');
+        msgs.push(`${i}층: 이번 검침(${c.value})이 이전(${p.value})보다 작습니다 — 계량기는 누적이라 항상 커져야 해요`);
+      }else if(diff>200){
+        c.classList.add('invalid');
+        msgs.push(`${i}층: 사용량이 ${t(diff)}㎥로 비정상적으로 큽니다 — 자릿수를 확인해 주세요`);
+      }
+    }
+  }
+  const w=$('liveWarn');
+  if(msgs.length){ w.style.display='block'; w.innerHTML=msgs.map(m=>'⚠ '+m).join('<br>'); }
+  else{ w.style.display='none'; }
+  return msgs.length===0;
+}
+
+function calc(){
+  const total=+$('total').value;
+  const prev=[+$('p1').value,+$('p2').value,+$('p3').value];
+  const curr=[+$('c1').value,+$('c2').value,+$('c3').value];
+  const ppl=[+$('n1').value||0,+$('n2').value||0,+$('n3').value||0];
+  if(!total){ alert('총 고지금액을 입력해 주세요.'); return }
+  const use=curr.map((c,i)=>c-prev[i]);
+  if(use.some(u=>isNaN(u))){ alert('이전·이번 검침값을 모두 입력해 주세요.'); return }
+  if(!liveCheck()){ alert('빨간색으로 표시된 검침값을 먼저 확인해 주세요.'); return }
+  const sum=use.reduce((a,b)=>a+b,0);
+  if(sum<=0){ alert('사용량 합계가 0입니다. 검침값을 확인해 주세요.'); return }
+  const basisDate=editing&&editing.prevDate!==undefined?editing.prevDate:(data.prev?data.prev.date:null);
+  if(basisDate&&$('date').value<=basisDate){
+    alert('검침일('+$('date').value+')이 지난 정산 마감일('+basisDate+')보다 늦어야 합니다.\n구간이 겹치거나 뒤집혀 있어요.'); return
+  }
+
+  // 사용량 비율 배분 (10원 단위 반올림, 마지막 층에서 오차 보정)
+  // 수도요금 배분 (선택한 방식: 사용량/인원수/혼합)
+  const sw=splitWater(total,use,ppl);
+  if(sw.err){ alert(sw.err); return }
+  const amt=sw.amt, splitLabel=sw.label;
+
+  // 추가 비용 배분 (그래프·사용량과 무관, 금액에만 합산)
+  const extras=readExtras();
+  extras.forEach(x=>{
+    x.per=split10(x.amt, x.mode==='use'?use : x.mode==='ppl'?ppl : [1,1,1]);
+  });
+  const extraPer=[0,1,2].map(i=>extras.reduce((a,x)=>a+x.per[i],0));
+  const extraSum=extras.reduce((a,x)=>a+x.amt,0);
+  const finals=amt.map((a,i)=>a+extraPer[i]);
+
+  // 인원수 방식 비교
+  const pSum=ppl.reduce((a,b)=>a+b,0);
+  const pAmt=pSum>0?ppl.map(p=>Math.round(total*p/pSum/10)*10):[0,0,0];
+  if(pSum>0) pAmt[2]=total-pAmt[0]-pAmt[1];
+
+  // 파이프 그래프 (수도 사용량 기준 — 추가 비용 미반영)
+  const colors=['var(--f1)','var(--f2)','var(--f3)'];
+  $('pipe').innerHTML=use.map((u,i)=>
+    `<div style="flex:${u||0.0001};background:${colors[i]}">${i+1}층 ${Math.round(u/sum*100)}%</div>`).join('');
+
+  // 표
+  $('tbody').innerHTML=use.map((u,i)=>{
+    const d=pSum>0?amt[i]-pAmt[i]:0;
+    const dTxt=pSum>0?(d>0?`<span class="diff-plus">+${d.toLocaleString()}원</span>`
+                      :d<0?`<span class="diff-minus">−${(-d).toLocaleString()}원</span>`:'같음'):'—';
+    const brk=extraSum>0?`<div class="hint" style="margin-top:2px">수도 ${won(amt[i])} + 추가 ${won(extraPer[i])}</div>`:'';
+    return `<tr><td><span class="dot" style="background:${colors[i]}"></span>${i+1}층</td>
+      <td>${t(u)}㎥</td><td>${(u/sum*100).toFixed(1)}%</td>
+      <td class="amt">${won(finals[i])}${brk}</td><td>${dTxt}</td></tr>`;
+  }).join('');
+  $('checkNote').textContent=(extraSum>0
+    ?`세 층 합계 ${won(finals[0]+finals[1]+finals[2])} = 수도 ${won(total)} + 추가 ${won(extraSum)} · 총 사용량 ${t(sum)}㎥ (그래프는 수도 사용량만 반영)`
+    :`세 층 합계 ${won(amt[0]+amt[1]+amt[2])} = 고지금액과 일치 · 총 사용량 ${t(sum)}㎥`)
+    +` · 배분: ${splitLabel}`;
+
+  // 공유 문구
+  const date=$('date').value;
+  const billMonth=$('billMonth').value||date.slice(0,7);
+  const bmNum=+billMonth.split('-')[1];
+  const modeName={eq:'균등',use:'사용량 비율',ppl:'인원수 비율'};
+  let txt=`💧 ${bmNum}월분 수도요금 정산 (검침 ${date})
+총 고지금액: ${won(total)} / 자체 검침 사용량 ${t(sum)}㎥ / 배분: ${splitLabel}`;
+  if(extraSum>0){
+    txt+='\n추가 비용: '+extras.map(x=>`${x.name} ${won(x.amt)}(${modeName[x.mode]}·${+x.month.split('-')[1]}월분)`).join(', ');
+  }
+  for(let i=0;i<3;i++){
+    txt+=`\n· ${i+1}층: 검침 ${t(prev[i])}→${t(curr[i])} / ${t(use[i])}㎥ / ${won(finals[i])}`
+      +(extraSum>0?` (수도 ${won(amt[i])}+추가 ${won(extraPer[i])})`:'');
+  }
+  txt+='\n(계량기 사진 첨부)';
+  txt+='\n※ 시청 검침일과 자체 검침일이 달라 고지서 톤수와 층별 합계는 다를 수 있습니다. 금액은 비율 배분이라 오차 없이 정산되며, 구간 차이는 다음 정산에 자동 반영됩니다.';
+  $('copybox').textContent=txt;
+
+  lastCalc={date,total,billMonth,use,amt,prev,curr,sum,finals,extraPer,extraSum,split:splitLabel,
+    extras:extras.map(x=>({name:x.name,amt:x.amt,mode:x.mode,month:x.month,per:x.per})),
+    extraImgs:extras.map(x=>x.img),
+    prevDate:data.prev?data.prev.date:null};
+  $('result').style.display='block';
+  if(data.phones&&data.phones.length) $('smsBtn').style.display='block';
+  $('saveBtn').textContent='이번 검침값 저장 (다음 정산 준비)';
+  $('result').scrollIntoView({behavior:'smooth'});
+}
+
+async function save(){
+  if(!lastCalc) return;
+  if(!data.hook||!data.key||!isAdmin){ alert('구글 시트 연동과 관리자 인증이 필요합니다.\n🔐 관리자에서 웹 앱 URL과 키를 설정해 주세요.'); return }
+  if(!editing && histSrc().some(h=>h.date===lastCalc.date)){
+    if(!confirm(lastCalc.date+' 날짜의 정산이 이미 저장되어 있습니다.\n같은 날짜로 또 저장하면 사진이 덮어써질 수 있어요.\n(수정하려면 월별 현황이나 기록의 ✏️ 수정을 이용하세요)\n\n그래도 저장할까요?')) return;
+  }
+  data.people=[+$('n1').value||0,+$('n2').value||0,+$('n3').value||0];
+  // 사진 페이로드 (정산 항목 + 추가비용 증빙 x0, x1 …)
+  const allFull={};
+  Object.keys(imgs).forEach(s=>allFull[s]=imgs[s].full);
+  const imgLabels={};
+  lastCalc.extraImgs.forEach((im,i)=>{
+    if(!im) return;
+    allFull['x'+i]=im.full;
+    imgLabels['x'+i]=lastCalc.extras[i].name;
+  });
+  // 수정 모드: 새 업로드가 없는 기존 드라이브 사진은 유지
+  const keepPhotos={};
+  if(editing&&editing.photos){
+    Object.keys(editing.photos).forEach(s=>{
+      if(editing.photos[s]&&!imgs[s]) keepPhotos[s]=editing.photos[s];
+    });
+  }
+  const sheetPayload={key:data.key,date:lastCalc.date,prevDate:lastCalc.prevDate,total:lastCalc.total,
+    prev:lastCalc.prev,curr:lastCalc.curr,use:lastCalc.use,amt:lastCalc.amt,
+    finals:lastCalc.finals,extras:lastCalc.extras,extraSum:lastCalc.extraSum,split:lastCalc.split,billMonth:lastCalc.billMonth,
+    imgs:allFull,imgLabels:imgLabels,
+    mode:editing?'update':'append',
+    origDate:editing?editing.date:'',
+    keep:editing?{photos:keepPhotos,extraPhotos:editing.extraPhotos}:null};
+  busy('☁ 구글 시트로 전송 중… (사진 포함 시 수십 초 걸릴 수 있어요)');
+  $('saveBtn').textContent='☁ 시트로 전송 중…';
+  try{
+    const res=await fetch(data.hook,{method:'POST',body:JSON.stringify(sheetPayload)});
+    const j=await res.json();
+    if(!j.ok) throw new Error(j.error||'전송 실패');
+    if(j.phones&&j.phones.length){ data.phones=j.phones; $('smsBtn').style.display='block'; }
+    busyDone('✓ 시트 기록 완료'+(j.mailed?' · 메일 '+j.mailed+'명 발송':''));
+    $('saveBtn').textContent='✓ 시트 기록'+(j.mailed?' + 메일 '+j.mailed+'명 발송':'')+' 완료';
+    // 폼 정리 후 시트에서 재수신 (이전 검침·기록·사진 링크가 새로 반영됨)
+    imgs={};
+    ['bill','f1','f2','f3'].forEach(sl=>{ const el=$('pv-'+sl); if(el) el.innerHTML=''; });
+    document.querySelectorAll('.slot input[type=file], .mid-grid input[type=file]').forEach(i=>i.value='');
+    $('extraList').innerHTML='';
+    [1,2,3].forEach(i=>$('c'+i).value='');
+    if(editing){ editing=null; $('editBanner').style.display='none'; }
+    await refresh();
+    updatePeriod(); liveCheck();
+  }catch(e){
+    busyDone();
+    $('saveBtn').textContent='이번 검침값 저장 (다음 정산 준비)';
+    alert('구글 시트 전송에 실패해 기록되지 않았습니다.\n입력값은 그대로 있으니 인터넷 연결과 URL을 확인한 뒤 다시 저장해 주세요.\n(Claude 미리보기 안에서는 외부 전송이 차단됩니다 — 파일을 직접 열어 쓸 때 동작해요)');
+  }
+}
+
+/* 정산 + 중간 검침을 합친 검침 시점 목록 (날짜 오름차순)
+ * 같은 날짜면 정산 검침값이 우선 */
+function readingPoints(){
+  const pts={};
+  histSrc().forEach(h=>{
+    if(h.prevDate&&h.prev&&!pts[h.prevDate]) pts[h.prevDate]={date:h.prevDate,r:h.prev};
+    if(h.date&&h.curr) pts[h.date]={date:h.date,r:h.curr};
+  });
+  midsSrc().forEach(m=>{
+    if(m.date&&m.readings&&!pts[m.date]) pts[m.date]={date:m.date,r:m.readings,mid:true};
+  });
+  return Object.values(pts).sort((a,b)=>a.date<b.date?-1:1);
+}
+
+/* ── 매월 검침 기록 (구글 시트 "중간검침" 탭에 저장) ── */
+async function saveMid(){
+  const date=$('date').value;
+  const r=[+$('c1').value,+$('c2').value,+$('c3').value];
+  const w=$('liveWarn');
+  if(!data.hook||!data.key||!isAdmin){ alert('구글 시트 연동과 관리자 인증이 필요합니다.\n🔐 관리자에서 웹 앱 URL과 키를 설정해 주세요.'); return }
+  if(!date){ alert('검침 날짜를 선택해 주세요.'); return }
+  if([1,2,3].some(i=>$('c'+i).value==='')||r.some(v=>isNaN(v))){
+    alert('세 층의 계량기 숫자를 모두 입력해 주세요.'); return
+  }
+  // 이 회차 계량기 사진 (f1~f3 슬롯 → 기록용 m1~m3)
+  const midImgs={};
+  ['f1','f2','f3'].forEach((fs,i)=>{ if(imgs[fs]) midImgs['m'+(i+1)]=imgs[fs]; });
+  // 직전 검침 시점과 비교해 순서·이상값 확인 (중복·역행 방지)
+  const pts0=readingPoints();
+  const lastPt=pts0.length?pts0[pts0.length-1]:null;
+  const sameDate=pts0.find(p=>p.date===date);
+  if(lastPt&&date<lastPt.date){
+    w.style.display='block';
+    w.textContent='⚠ 최근 검침('+lastPt.date+')보다 앞선 날짜입니다 — 검침은 날짜 순서대로만 기록할 수 있어요. 과거 기록을 고치려면 해당 기록을 삭제 후 다시 넣어주세요.';
+    return;
+  }
+  if(sameDate&&!confirm(date+' 검침이 이미 있습니다. 새 값으로 교체할까요?')) return;
+  const before=pts0.filter(p=>p.date<date).pop();
+  if(before){
+    const bad=[0,1,2].filter(i=>r[i]<before.r[i]);
+    if(bad.length){
+      w.style.display='block';
+      w.textContent='⚠ '+bad.map(i=>(i+1)+'층').join(', ')+': '+before.date+' 검침값보다 작습니다 — 계량기는 누적이라 항상 커져야 해요. 자릿수를 확인해 주세요.';
+      return;
+    }
+    const big=[0,1,2].filter(i=>r[i]-before.r[i]>200);
+    if(big.length&&!confirm(big.map(i=>(i+1)+'층').join(', ')+' 사용량이 비정상적으로 큽니다. 그래도 저장할까요?')) return;
+    const gap=Math.round((new Date(date)-new Date(before.date))/86400000);
+    if(gap>40&&!confirm('직전 검침('+before.date+')에서 '+gap+'일이 지났어요 — 한 달분이 비었을 수 있습니다.\n(누적계라 사용량이 유실되진 않지만 월별 비교에서 그 달은 빠집니다)\n그래도 이 날짜로 기록할까요?')) return;
+  }
+  busy('☁ 구글 시트로 전송 중… (사진 포함 시 수십 초 걸릴 수 있어요)');
+  $('midBtn').textContent='☁ 시트로 전송 중…';
+  try{
+    const payload={key:data.key,kind:'mid',date,readings:r,imgs:{}};
+    Object.keys(midImgs).forEach(sl=>payload.imgs[sl]=midImgs[sl].full);
+    const j=await (await fetch(data.hook,{method:'POST',body:JSON.stringify(payload)})).json();
+    if(!j||!j.ok) throw new Error(j&&j.error||'전송 실패');
+    busyDone('✓ 시트 저장 완료');
+    $('midBtn').textContent='✓ 검침 기록 완료';
+    // 사진 미리보기 정리 (숫자는 곧바로 정산에 이어 쓸 수 있게 유지)
+    ['f1','f2','f3'].forEach(fs=>{ delete imgs[fs]; const el=$('pv-'+fs); if(el) el.innerHTML=''; });
+    document.querySelectorAll('.mid-grid input[type=file]').forEach(i=>i.value='');
+    await refresh();
+    updatePeriod();
+  }catch(e){
+    busyDone();
+    $('midBtn').textContent='이번 달 검침 기록하기';
+    alert('구글 시트 전송에 실패해 기록되지 않았습니다.\n입력값은 그대로 있으니 인터넷 연결을 확인한 뒤 다시 시도해 주세요.\n(Claude 미리보기 안에서는 외부 전송이 차단됩니다 — 파일을 직접 열어 쓸 때 동작해요)');
+    return;
+  }
+  setTimeout(()=>$('midBtn').textContent='이번 달 검침 기록하기',2500);
+}
+
+async function deleteMid(date){
+  if(!data.hook||!data.key||!isAdmin){ alert('관리자 인증이 필요합니다.'); return }
+  if(!confirm(date+' 검침 기록을 지울까요? (정산 회차는 여기서 지워지지 않아요)')) return;
+  busy('구글 시트에서 삭제하는 중…');
+  try{
+    const j=await (await fetch(data.hook,{method:'POST',body:JSON.stringify({key:data.key,kind:'midDelete',date})})).json();
+    if(!j||!j.ok) throw new Error('삭제 실패');
+    busyDone('✓ 삭제 완료');
+    await refresh();
+  }catch(e){
+    busyDone();
+    alert('삭제에 실패했습니다. 인터넷 연결을 확인해 주세요.');
+  }
+}
+
+function renderMidList(){
+  const box=$('midList'); if(!box) return;
+  const list=midsSrc().slice(0,12);
+  if(!list.length){ box.innerHTML=''; return }
+  const pts=readingPoints();
+  box.innerHTML='<label style="margin:12px 0 2px">월별 검침 기록</label>'+list.map(m=>{
+    const idx=pts.findIndex(p=>p.date===m.date);
+    const prev=idx>0?pts[idx-1]:null;
+    const useTxt=prev?'직전 대비 '+[0,1,2].map(i=>t(m.readings[i]-prev.r[i])).join(' / ')+'㎥':'';
+    const cells=[];
+    ['m1','m2','m3'].forEach((sl,i)=>{
+      if(m.photos&&m.photos[sl]){
+        const tsrc=driveThumb(m.photos[sl],200);
+        if(tsrc) cells.push(`<img class="hist-thumb" src="${tsrc}" onerror="this.style.display='none'" onclick="showDrive('${m.photos[sl]}','${m.date} ${i+1}층 계량기')" alt="${i+1}층 계량기" loading="lazy">`);
+      }
+    });
+    return `<div class="hist-item" style="font-size:13px">
+      <div class="hist-date" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">📷 ${m.date} · 검침 ${m.readings.map(t).join(' / ')}㎥ ${useTxt?'· '+useTxt:''}
+        <button class="edit-btn admin-only" onclick="deleteMid('${m.date}')">삭제</button></div>
+      ${cells.length?'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:2px">'+cells.join('')+'</div>':''}
+    </div>`;
+  }).join('');
+}
+
+let chartRange=12; // 최근 12개월 / 24개월 / 0=전체
+function setRange(n,btn){
+  chartRange=n;
+  document.querySelectorAll('#rangeSeg button').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  renderChart();
+}
+
+/* 월별 사용량 집계 — 구간 끝 날짜의 달로 귀속, 45일 초과 구간(2개월 통합 검침)은 월 비교에서 제외 */
+function monthlyUsage(){
+  const pts=readingPoints();
+  const out={};
+  for(let i=1;i<pts.length;i++){
+    const use=[0,1,2].map(f=>pts[i].r[f]-pts[i-1].r[f]);
+    if(use.some(u=>isNaN(u)||u<0)) continue;
+    const days=(new Date(pts[i].date)-new Date(pts[i-1].date))/86400000;
+    if(days>45) continue;
+    const key=pts[i].date.slice(0,7);
+    out[key]=out[key]?out[key].map((v,f)=>v+use[f]):use.slice();
+  }
+  return out;
+}
+
+function compareHtml(){
+  const mu=monthlyUsage();
+  const keys=Object.keys(mu).sort();
+  if(!keys.length) return '';
+  const k=keys[keys.length-1];
+  const [y,m]=k.split('-').map(Number);
+  const pad=n=>String(n).padStart(2,'0');
+  const momK=m===1?(y-1)+'-12':y+'-'+pad(m-1);
+  const yoyK=(y-1)+'-'+pad(m);
+  const diff=(cur,base)=>{
+    if(base===undefined||base===null) return '—';
+    const d=Math.round((cur-base)*10)/10;
+    if(d>0) return `<span class="diff-plus">+${t(d)}㎥</span>`;
+    if(d<0) return `<span class="diff-minus">−${t(-d)}㎥</span>`;
+    return '같음';
+  };
+  const names=['1층','2층','3층','합계'];
+  const cur=[...mu[k],mu[k].reduce((a,b)=>a+b,0)];
+  const mom=mu[momK]?[...mu[momK],mu[momK].reduce((a,b)=>a+b,0)]:null;
+  const yoy=mu[yoyK]?[...mu[yoyK],mu[yoyK].reduce((a,b)=>a+b,0)]:null;
+  const rows=names.map((n,i)=>
+    `<tr><td>${n}</td><td>${t(cur[i])}㎥</td>`+
+    `<td>${mom?diff(cur[i],mom[i]):'—'}</td>`+
+    `<td>${yoy?diff(cur[i],yoy[i]):'—'}</td></tr>`).join('');
+  return `<table style="margin-top:12px">
+    <thead><tr><th>${m}월</th><th>사용량</th><th>전월 대비</th><th>전년 동월 대비</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="hint">매월 검침이 쌓여야 채워집니다. 2개월 통합으로 검침한 과거 구간은 월 비교에서 제외돼요.</div>`;
+}
+
+function renderChart(){
+  const box=$('chart');
+  // 정산 + 중간 검침을 합친 시점으로 구간별 사용량 계산 (매월 검침하면 월 단위로 표시)
+  const pts=readingPoints();
+  const segs=[];
+  for(let i=1;i<pts.length;i++){
+    const use=[0,1,2].map(f=>pts[i].r[f]-pts[i-1].r[f]);
+    if(use.some(u=>isNaN(u)||u<0)) continue; // 계량기 교체 등 비정상 구간 제외
+    segs.push({date:pts[i].date,use});
+  }
+  let ent=segs;
+  if(chartRange>0){
+    const c=new Date(); c.setMonth(c.getMonth()-chartRange);
+    const cut=c.toISOString().slice(0,10);
+    ent=segs.filter(s=>s.date>=cut);
+    if(ent.length<2) ent=segs.slice(-6); // 최근 범위에 기록이 적으면 최근 6구간
+  }
+  if(ent.length<2){ box.innerHTML='<div class="empty">검침 기록이 2회 이상 쌓이면 그래프가 표시됩니다.</div>'+compareHtml(); return }
+
+  const W=520,H=250,L=42,R=14,T=18,B=34;      // 여백
+  const iw=W-L-R, ih=H-T-B;
+  const maxU=Math.max(...ent.flatMap(h=>h.use));
+  const yMax=Math.max(5,Math.ceil(maxU/5)*5); // 5㎥ 단위 올림
+  const x=i=>L+(ent.length===1?iw/2:iw*i/(ent.length-1));
+  const y=v=>T+ih*(1-v/yMax);
+  const colors=['var(--f1)','var(--f2)','var(--f3)'];
+  const dateLbl=d=>{const p=d.split('-');return p[1]+'/'+p[2]};
+
+  // 가로 눈금선 + y축 라벨
+  let grid='';
+  for(let g=0;g<=4;g++){
+    const gy=T+ih*g/4, gv=Math.round(yMax*(1-g/4));
+    grid+=`<line x1="${L}" y1="${gy}" x2="${W-R}" y2="${gy}" stroke="#E3EBF1"/>`+
+          `<text x="${L-6}" y="${gy+4}" text-anchor="end" font-size="10" fill="var(--sub)">${gv}</text>`;
+  }
+  // x축 날짜 라벨 (많으면 겹치지 않게 건너뛰기)
+  const skip=Math.ceil(ent.length/8), showVal=ent.length<=8;
+  const xlbl=ent.map((h,i)=>(i%skip===0||i===ent.length-1)?
+    `<text x="${x(i)}" y="${H-12}" text-anchor="middle" font-size="10" fill="var(--sub)">${dateLbl(h.date)}</text>`:'').join('');
+  // 층별 선 + 점 + 값
+  const lines=[0,1,2].map(f=>{
+    const pts=ent.map((h,i)=>`${x(i)},${y(h.use[f])}`).join(' ');
+    const dots=ent.map((h,i)=>
+      `<circle cx="${x(i)}" cy="${y(h.use[f])}" r="3.5" fill="${colors[f]}"/>`+
+      (showVal?`<text x="${x(i)}" y="${y(h.use[f])-7}" text-anchor="middle" font-size="9.5" fill="${colors[f]}" font-weight="700">${t(h.use[f])}</text>`:'')
+    ).join('');
+    return `<polyline points="${pts}" fill="none" stroke="${colors[f]}" stroke-width="2.2" stroke-linejoin="round"/>`+dots;
+  }).join('');
+  const legend=[0,1,2].map(f=>
+    `<span style="font-size:12px;margin-right:12px"><span class="dot" style="background:${colors[f]}"></span>${f+1}층</span>`).join('');
+
+  box.innerHTML=`<div style="margin-bottom:4px">${legend}<span style="font-size:11px;color:var(--sub)">단위: ㎥</span></div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto" role="img" aria-label="층별 사용량 추이 그래프">${grid}${xlbl}${lines}</svg>
+    ${compareHtml()}
+    <div class="note">한 층만 갑자기 치솟으면 누수 가능성이 있으니, 그 층의 별모양(물흐름 표시)이 물 안 쓸 때도 도는지 확인해 보세요.</div>`;
+}
+
+/* ── 수정 모드: 과거 회차를 폼으로 불러와 고쳐서 재저장 ── */
+let editing=null; // {date, photos, extraPhotos} — 수정 중인 원본 회차
+
+function parseExtraDesc(desc){
+  const modeMap={'균등':'eq','사용량비율':'use','인원수비율':'ppl'};
+  return String(desc).split(', ').map(s=>{
+    const m=s.match(/^(.*?)\s([\d,]+)원(?:\((.*?)\))?$/);
+    if(!m) return null;
+    const parts=(m[3]||'').split('·');
+    return {name:m[1],amt:+m[2].replace(/,/g,''),mode:modeMap[parts[0]]||'eq',month:parts[1]||''};
+  }).filter(Boolean);
+}
+
+function loadRecord(date){
+  const h=histSrc().find(r=>r.date===date);
+  if(!h) return;
+  editing={date:h.date,prevDate:h.prevDate||null,photos:h.photos?{...h.photos}:{},extraPhotos:(h.extraPhotos||[]).slice()};
+  $('total').value=h.total;
+  $('date').value=h.date;
+  billMonthManual=true;
+  $('billMonth').value=h.billMonth||h.date.slice(0,7);
+  [1,2,3].forEach(i=>{
+    $('p'+i).value=h.prev?h.prev[i-1]:'';
+    $('c'+i).value=h.curr?h.curr[i-1]:'';
+  });
+  // 추가 비용 복원 (원격 기록은 내역 문자열에서 복원)
+  $('extraList').innerHTML='';
+  const xs=h.extras||(h.extraDesc?parseExtraDesc(h.extraDesc):[]);
+  xs.forEach(x=>{
+    addExtra();
+    const row=$('extraList').lastElementChild;
+    row.querySelector('.x-name').value=x.name;
+    row.querySelector('.x-amt').value=x.amt;
+    if(x.mode) row.querySelector('.x-mode').value=x.mode;
+    if(x.month) row.querySelector('.x-month').value=x.month;
+  });
+  // 기존 사진 표시 (새로 올리면 교체)
+  imgs={};
+  ['bill','f1','f2','f3'].forEach(s=>{
+    const pv=$('pv-'+s); pv.innerHTML='';
+    const th=(h.thumbs&&h.thumbs[s])||((h.photos&&h.photos[s])?driveThumb(h.photos[s],200):null);
+    if(th) pv.innerHTML=`<img src="${th}" alt="기존 사진"><div class="hint">기존 유지 · 새로 올리면 교체</div>`;
+  });
+  // 배분 방식 복원
+  const sp=h.split||'사용량';
+  if(sp.indexOf('혼합')===0){
+    $('splitMode').value='mix';
+    [1,2,3].forEach(i=>$('fm'+i).value=sp.indexOf(i+'층 인원수')>=0?'ppl':'use');
+  }else{
+    $('splitMode').value=sp==='인원수'?'ppl':'use';
+  }
+  onSplitMode();
+  setMode('settle');
+  $('prevEdit').style.display='block';
+  $('editBanner').style.display='flex';
+  $('editLbl').textContent=h.date+' 회차 수정 중';
+  $('result').style.display='none';
+  updateMeterLabels();
+  updatePeriod();
+  liveCheck();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function cancelEdit(){
+  editing=null;
+  $('editBanner').style.display='none';
+  $('total').value=''; $('date').value=new Date().toISOString().slice(0,10); billMonthManual=false; $('billMonth').value=$('date').value.slice(0,7);
+  $('extraList').innerHTML=''; imgs={};
+  ['bill','f1','f2','f3'].forEach(s=>{ $('pv-'+s).innerHTML=''; });
+  document.querySelectorAll('.slot input[type=file], .mid-grid input[type=file]').forEach(i=>i.value='');
+  if(data.prev) [1,2,3].forEach(i=>{ $('p'+i).value=data.prev.readings[i-1]; $('c'+i).value=''; });
+  $('result').style.display='none';
+  updateMeterLabels();
+  updatePeriod();
+  liveCheck();
+}
+
+/* ── 드래그앤드랍 업로드 ── */
+function enableDrop(zone,input){
+  ['dragover','dragenter'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.remove('drag');}));
+  zone.addEventListener('drop',e=>{
+    const f=[...e.dataTransfer.files].find(x=>x.type.startsWith('image/'));
+    if(!f) return;
+    const dt=new DataTransfer(); dt.items.add(f);
+    input.files=dt.files;
+    input.dispatchEvent(new Event('change'));
+  });
+}
+document.querySelectorAll('.slot').forEach(s=>enableDrop(s,s.querySelector('input[type=file]')));
+document.querySelectorAll('.mid-grid input[type=file]').forEach(i=>enableDrop(i.parentElement,i));
+
+/* ── 월별 현황 그리드 ── */
+let gridYear=null;
+function moveGridYear(d){ gridYear+=d; renderMonthGrid(); }
+
+function renderMonthGrid(){
+  const src=histSrc();
+  if(gridYear===null){
+    gridYear=src.length?+(src[0].billMonth||src[0].date).slice(0,4)
+      :(midsSrc().length?+midsSrc()[0].date.slice(0,4):new Date().getFullYear());
+  }
+  $('gridYearLbl').textContent=gridYear+'년';
+  // 정산: 귀속월 기준 / 검침: 검침일의 달 기준
+  const byMonth={};
+  src.forEach(h=>{
+    const bm=h.billMonth||h.date.slice(0,7);
+    const [yy,mm]=bm.split('-');
+    if(+yy===gridYear && !byMonth[+mm]) byMonth[+mm]=h;
+  });
+  const midBy={};
+  midsSrc().forEach(m=>{
+    const [yy,mm]=m.date.split('-');
+    if(+yy===gridYear){ (midBy[+mm]=midBy[+mm]||[]).push(m); }
+  });
+  let html='';
+  for(let m=1;m<=12;m++){
+    const h=byMonth[m], mids=midBy[m];
+    if(h){
+      const tot=(h.finals||h.amt).reduce((a,b)=>a+b,0);
+      const marks=(mids&&mids.length)?' ·📷':'';
+      html+=`<div class="mcell on" onclick="openMonth(${m})">${m}월<small>${tot.toLocaleString()}${marks}</small></div>`;
+    }else if(mids&&mids.length){
+      html+=`<div class="mcell mid" onclick="openMonth(${m})">${m}월<small>📷 검침</small></div>`;
+    }else{
+      html+=`<div class="mcell">${m}월<small>—</small></div>`;
+    }
+  }
+  $('mgrid').innerHTML=html;
+}
+
+/* 기록 목록에서: 귀속월(YYYY-MM)로 월 상세 열기 */
+function openMonthYm(ym){
+  const [y,m]=String(ym).split('-').map(Number);
+  if(!y||!m) return;
+  if(gridYear!==y){ gridYear=y; renderMonthGrid(); }
+  openMonth(m);
+}
+
+/* 월 상세 보기 — 그 달의 정산 내역·고지서·계량기 사진을 한 화면에 */
+function openMonth(m){
+  const ym=gridYear+'-'+String(m).padStart(2,'0');
+  const h=histSrc().find(x=>(x.billMonth||x.date.slice(0,7))===ym);
+  const mids=midsSrc().filter(x=>x.date.slice(0,7)===ym).sort((a,b)=>a.date<b.date?-1:1);
+  $('mmTitle').textContent=gridYear+'년 '+m+'월';
+  const photoCell=(url,label)=>{
+    const tsrc=driveThumb(url,200); if(!tsrc) return '';
+    const esc=String(label).replace(/'/g,'');
+    return `<div style="text-align:center"><img class="hist-thumb" style="margin-top:0" src="${tsrc}" onerror="this.parentElement.style.display='none'" onclick="showDrive('${url}','${esc}')" alt="${esc}" loading="lazy"><div class="hint" style="margin-top:2px">${esc}</div></div>`;
+  };
+  let html='';
+  if(h){
+    const fin=h.finals||h.amt;
+    const sum=h.use.reduce((a,b)=>a+b,0);
+    html+=`<div class="mm-sec"><b>🧾 ${m}월분 정산</b>
+      <div class="hint">구간 ${h.prevDate?h.prevDate+' → ':''}${h.date} · 총 ${won(h.total)}${h.extraSum>0?' + 추가 '+won(h.extraSum):''} · ${t(sum)}㎥ · 배분: ${h.split||'사용량'}</div>
+      <table style="margin-top:6px"><thead><tr><th>층</th><th>검침 (이전 → 이번)</th><th>사용량</th><th>부담액</th></tr></thead><tbody>
+      ${[0,1,2].map(i=>`<tr><td>${i+1}층</td><td>${(h.prev&&h.curr)?t(h.prev[i])+' → '+t(h.curr[i]):'—'}</td><td>${t(h.use[i])}㎥</td><td class="amt" style="font-size:14px">${won(fin[i])}</td></tr>`).join('')}
+      </tbody></table>`;
+    const cells=[];
+    if(h.photos){
+      const lbl={bill:'📄 고지서',f1:'1층 계량기',f2:'2층 계량기',f3:'3층 계량기'};
+      ['bill','f1','f2','f3'].forEach(sl=>{ if(h.photos[sl]) cells.push(photoCell(h.photos[sl],lbl[sl])); });
+    }
+    (h.extraPhotos||[]).forEach(u=>{ if(u) cells.push(photoCell(u,'추가 증빙')); });
+    html+=cells.length?'<div class="mm-photos">'+cells.join('')+'</div>'
+      :'<div class="hint" style="margin-top:6px">이 정산에 저장된 사진이 없습니다.</div>';
+    html+=`<button class="btn ghost admin-only" style="margin-top:12px" onclick="document.getElementById('monthModal').style.display='none';loadRecord('${h.date}')">✏️ 이 정산 수정하기</button></div>`;
+  }
+  mids.forEach(md=>{
+    html+=`<div class="mm-sec"><b>📷 ${md.date} 검침</b>
+      <div class="hint">계량기 ${md.readings.map(t).join(' / ')}㎥ (1·2·3층)</div>`;
+    const cells=[];
+    ['m1','m2','m3'].forEach((sl,i)=>{ if(md.photos&&md.photos[sl]) cells.push(photoCell(md.photos[sl],(i+1)+'층 계량기')); });
+    html+=cells.length?'<div class="mm-photos">'+cells.join('')+'</div>'
+      :'<div class="hint" style="margin-top:6px">사진 없음</div>';
+    html+='</div>';
+  });
+  if(!html) html='<div class="empty">이 달의 기록이 없습니다.</div>';
+  $('mmBody').innerHTML=html;
+  $('monthModal').style.display='flex';
+}
+
+function gotoMonth(date){
+  if($('yearSel').value!=='all'&&$('yearSel').value!==date.slice(0,4)){
+    $('yearSel').value='all';
+    renderHist();
+  }
+  const el=document.getElementById('h-'+date);
+  if(!el) return;
+  el.scrollIntoView({behavior:'smooth',block:'center'});
+  el.classList.add('flash');
+  setTimeout(()=>el.classList.remove('flash'),1500);
+}
+
+function renderHist(){
+  renderChart();
+  renderMonthGrid();
+  renderMidList();
+  renderStats();
+  renderViewerSummary();
+  // 연도 필터 옵션 자동 생성 (선택 유지)
+  const sel=$('yearSel'), keep=sel.value;
+  const years=[...new Set(histSrc().map(h=>(h.billMonth||h.date).slice(0,4)))];
+  sel.innerHTML='<option value="all">전체 기간</option>'+years.map(y=>`<option value="${y}">${y}년</option>`).join('');
+  if([...sel.options].some(o=>o.value===keep)) sel.value=keep;
+
+  if(!histSrc().length){ $('hist').innerHTML='<div class="empty">아직 저장된 기록이 없습니다.</div>'; return }
+  const list=sel.value==='all'?histSrc():histSrc().filter(h=>(h.billMonth||h.date).slice(0,4)===sel.value);
+  if(!list.length){ $('hist').innerHTML='<div class="empty">해당 연도의 기록이 없습니다.</div>'; return }
+  let html='', lastYear='';
+  list.forEach(h=>{
+    const bm=h.billMonth||h.date.slice(0,7);
+    const [yy,mm]=bm.split('-');
+    if(yy!==lastYear){ html+=`<div class="year-head">${yy}년</div>`; lastYear=yy; }
+    const sum=h.use.reduce((a,b)=>a+b,0);
+    const period=(h.prevDate?h.prevDate.slice(5).replace('-','/')+' → ':'')+h.date.slice(5).replace('-','/');
+    const fin=h.finals||h.amt;
+    const hasX=h.extraSum>0;
+    const hasPhoto=(h.photos&&Object.values(h.photos).some(u=>u))||(h.extraPhotos&&h.extraPhotos.length);
+    const splitTag=(h.split&&h.split!=='사용량')?` · <span style="color:var(--water-deep);font-weight:700">${h.split}</span>`:'';
+    html+=`<div class="hist-item hist-click" onclick="openMonthYm('${bm}')" title="누르면 상세·사진 보기">
+      <div class="hist-date" style="display:flex;align-items:center;flex-wrap:wrap;gap:2px">
+        <span class="month-tag">${+mm}월분</span>${period} · 총 ${h.total.toLocaleString()}${hasX?' + '+h.extraSum.toLocaleString():''} · ${t(sum)}㎥${splitTag}${hasPhoto?' · 📷':''}
+      </div>
+      <div style="font-size:13.5px;margin-top:4px;font-variant-numeric:tabular-nums">
+        ${[0,1,2].map(i=>`<span style="margin-right:12px"><span style="color:var(--sub)">${i+1}층</span> <b>${fin[i].toLocaleString()}</b></span>`).join('')}
+        <span style="float:right;color:var(--sub);font-size:12px">자세히 ›</span>
+      </div>
+    </div>`;
+  });
+  $('hist').innerHTML=html+(list.length>=2?
+    '<div class="note">기록이 쌓이면 층별 비율이 일정한지 보입니다. 비율이 안정적이면 매번 검침 없이 고정 비율로 단순화하는 것도 가족과 논의해 보세요.</div>':'');
+}
+
+function copyText(){
+  const txt=$('copybox').textContent;
+  navigator.clipboard.writeText(txt).then(
+    ()=>alert('복사되었습니다. 가족 대화방에 붙여넣으세요.'),
+    ()=>alert('복사가 안 되면 아래 문구를 길게 눌러 직접 복사해 주세요.'));
+}
+
+function resetCfg(){
+  if(!confirm('이 브라우저에 저장된 웹 앱 URL과 관리자 키를 지울까요?\n구글 시트의 기록·사진에는 아무 영향이 없습니다.')) return;
+  try{ localStorage.removeItem(CFG_KEY); }catch(e){}
+  location.reload();
+}
+
+function sendSms(){
+  const phones=(data.phones||[]).map(p=>p.replace(/[^0-9+]/g,'')).filter(Boolean);
+  if(!phones.length){
+    alert('구성원 전화번호가 없습니다.\n구글 시트의 "구성원" 탭에 이름과 전화번호를 먼저 등록해 주세요.');
+    return;
+  }
+  let body=$('copybox').textContent;
+  if(data.account) body+='\n입금 계좌: '+data.account+(data.accountOwner?' ('+data.accountOwner+')':'');
+  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent);
+  // iOS는 &body=, 안드로이드는 ?body= 를 사용
+  const url='sms:'+phones.join(',')+(ios?'&':'?')+'body='+encodeURIComponent(body);
+  location.href=url;
+}
+
+async function saveHook(){
+  const url=$('hookUrl').value.trim();
+  if(url&&!/^https:\/\/script\.google\.com\/macros\//.test(url)){
+    alert('Apps Script 웹 앱 URL 형식이 아닙니다.\n배포 후 발급되는 https://script.google.com/macros/s/…/exec 주소를 넣어주세요.');
+    return;
+  }
+  data.hook=url;
+  data.key=$('adminKey').value.trim();
+  try{
+    saveCfg();
+    if(url&&data.key){
+      busy('구글 시트에 연결하는 중…');
+      setConnStat('busy');
+      $('hookBtn').textContent='⏳ 인증 중…';
+      const j=await (await fetch(url+'?key='+encodeURIComponent(data.key))).json();
+      if(j&&j.admin===true){
+        setAdmin(true);
+        busyDone('✓ 연동 완료 — 관리자 인증됨');
+        $('hookBtn').textContent='✓ 인증 완료';
+        await refresh(true);
+      }else{
+        setAdmin(false);
+        busyDone();
+        setConnStat('badkey');
+        $('hookBtn').textContent='✗ 키 불일치';
+      }
+    }else{
+      setConnStat(url?'viewer':'none');
+      $('hookBtn').textContent=url?'✓ 저장됨 (키 미입력)':'연동 해제됨';
+    }
+    setTimeout(()=>$('hookBtn').textContent='저장하고 인증',2500);
+  }catch(e){ busyDone(); setConnStat('fail'); alert('저장 또는 인증에 실패했습니다.'); }
+}
+
+load();
+</script>
