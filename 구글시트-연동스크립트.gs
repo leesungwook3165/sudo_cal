@@ -232,6 +232,7 @@ function doGet(e) {
     out.phones = getMembers_().map(function (m) { return m.phone; })
       .filter(function (p) { return p; });
     out.members = getMembers_(); // 앱에서 구성원 편집용
+    out.sheetUrl = SpreadsheetApp.getActiveSpreadsheet().getUrl();
   }
   return json_(out);
 }
