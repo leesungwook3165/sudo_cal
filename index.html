@@ -335,12 +335,6 @@
 <div class="card g-a admin-only">
   <h2>① 이번 달 검침 · 정산</h2>
   <div id="editBanner">✏️ <span id="editLbl"></span><button onclick="cancelEdit()">수정 취소</button></div>
-  <div class="row">
-    <div>
-      <label>1️⃣ 검침 날짜 (매월 같은 날 권장)</label>
-      <input type="date" id="date" onchange="onDateChange()">
-    </div>
-  </div>
 
   <div class="mid-grid" style="margin-top:12px;margin-bottom:2px">
     <div></div>
@@ -370,21 +364,28 @@
   </div>
 
   <div id="logPane">
-    <button class="btn ghost" id="midBtn" onclick="saveMid()">이번 달 검침 기록하기</button>
+    <div style="margin-top:12px">
+      <label>📅 검침 날짜 (매월 같은 날 권장)</label>
+      <input type="date" id="date" onchange="onDateChange()" oninput="syncDateFromLog_()">
+    </div>
+    <button class="btn ghost" id="midBtn" onclick="saveMid()" style="margin-top:10px">이번 달 검침 기록하기</button>
     <div class="hint">고지서가 없는 달은 이 버튼만 누르면 끝. 기록은 그래프와 아래 목록에 쌓이고, 정산 금액에는 영향을 주지 않아요.</div>
     <div id="midList"></div>
   </div>
 
   <div id="settlePane" style="display:none">
     <div style="margin-top:12px">
-      <label>1️⃣ 정산 마감 검침 (이번 회차 기준일 · 내가 검침한 날)</label>
-      <select id="closeSel" onchange="onCloseSel()" style="width:100%;margin:0"></select>
+      <label>📅 정산 마감 검침 날짜 (내가 계량기 읽은 날)</label>
+      <input type="date" id="dateSettle" oninput="syncDateFromSettle_()">
       <div class="hint">
-        수도청 고지서 마감일이 아니라 <b>내가 직접 계량기를 읽은 날</b>을 고르는 칸이에요.
+        수도청 고지서 마감일이 아니라 <b>내가 직접 계량기를 읽은 날</b>이에요.
         이 회차는 <b>이전 검침일 → 이 검침일</b> 사이 사용량 비율로 고지금액을 나눕니다.
-        내 검침일과 고지서 마감일 사이의 소비량은 <b>다음 회차에 자연스럽게 이월</b>됩니다
-        (다음 회차의 "이전 검침"이 오늘 값이 되니까요).
+        내 검침일과 고지서 마감일 사이의 소비량은 <b>다음 회차에 자연스럽게 이월</b>됩니다.
       </div>
+    </div>
+    <div style="margin-top:10px">
+      <label>⚡ 빠른 채우기 (선택) — 이전 검침에서 날짜·계량기 값 불러오기</label>
+      <select id="closeSel" onchange="onCloseSel()" style="width:100%;margin:0"></select>
     </div>
     <div class="hint" id="periodHint" style="margin-top:6px"></div>
     <div id="prevLine" class="hint" style="margin-top:4px"></div>
@@ -1026,8 +1027,16 @@ function setMode(m){
   $('modeSettle').classList.toggle('on',m==='settle');
   $('logPane').style.display=m==='log'?'block':'none';
   $('settlePane').style.display=m==='settle'?'block':'none';
-  if(m==='settle'){ renderCloseSel(); updatePeriod(); }
+  // 모드 전환 시 날짜 필드 동기화 (두 입력은 항상 같은 값 유지)
+  if(m==='settle'){ $('dateSettle').value=$('date').value; renderCloseSel(); updatePeriod(); }
+  else { $('date').value=$('dateSettle').value||$('date').value; }
 }
+/* 로그 모드에서 날짜 변경 시 정산 모드 입력도 함께 */
+function syncDateFromLog_(){ const ds=$('dateSettle'); if(ds) ds.value=$('date').value; onDateChange(); }
+/* 정산 모드에서 날짜 변경 시 로그 모드 입력도 함께 */
+function syncDateFromSettle_(){ const d=$('date'); if(d) d.value=$('dateSettle').value; onDateChange(); }
+/* 프로그래매틱하게 날짜 세팅할 때 두 필드 동시 업데이트 */
+function setDateBoth_(v){ if($('date')) $('date').value=v; if($('dateSettle')) $('dateSettle').value=v; }
 
 /* 귀속월 스테퍼 */
 function renderBillMonthLbl(){
@@ -1059,7 +1068,7 @@ function renderCloseSel(){
 function onCloseSel(){
   const d=$('closeSel').value; if(!d) return;
   const p=readingPoints().find(x=>x.date===d); if(!p) return;
-  $('date').value=d;
+  setDateBoth_(d);
   [1,2,3].forEach(i=>$('c'+i).value=p.r[i-1]);
   if(!billMonthManual) $('billMonth').value=d.slice(0,7);
   updateMeterLabels(); updatePeriod(); liveCheck();
@@ -1761,7 +1770,7 @@ function loadRecord(date){
   if(!h) return;
   editing={date:h.date,prevDate:h.prevDate||null,photos:h.photos?{...h.photos}:{},extraPhotos:(h.extraPhotos||[]).slice()};
   $('total').value=h.total;
-  $('date').value=h.date;
+  setDateBoth_(h.date);
   billMonthManual=true;
   $('billMonth').value=h.billMonth||h.date.slice(0,7);
   [1,2,3].forEach(i=>{
@@ -1809,7 +1818,7 @@ function loadRecord(date){
 function cancelEdit(){
   editing=null;
   $('editBanner').style.display='none';
-  $('total').value=''; $('date').value=new Date().toISOString().slice(0,10); billMonthManual=false; $('billMonth').value=$('date').value.slice(0,7);
+  $('total').value=''; setDateBoth_(new Date().toISOString().slice(0,10)); billMonthManual=false; $('billMonth').value=$('date').value.slice(0,7);
   $('extraList').innerHTML=''; imgs={};
   ['bill','f1','f2','f3'].forEach(s=>{ $('pv-'+s).innerHTML=''; });
   document.querySelectorAll('.slot input[type=file], .mid-grid input[type=file]').forEach(i=>i.value='');
