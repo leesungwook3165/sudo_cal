@@ -238,6 +238,12 @@ function getMonthFolder_(ym) {
 
 /** GET: 기록 조회는 누구나 가능(가족 뷰어용) · 전화번호·관리자 권한은 키가 맞을 때만 */
 function doGet(e) {
+  // 경량 폴링용 ping: 최근 입금 확인 시각만 반환 (수 바이트)
+  if (e && e.parameter && e.parameter.ping) {
+    let ts = 0;
+    try { ts = Number(PropertiesService.getScriptProperties().getProperty('depositTs') || '0'); } catch (err) { }
+    return json_({ ok: true, ts: ts });
+  }
   const isAdmin = checkKey_(e && e.parameter && e.parameter.key);
   const sh = getSheet();
   const last = sh.getLastRow();
@@ -513,6 +519,8 @@ function markPaid_(d, unmark) {
     // 관리자에게 확인 메일 (수동일 때는 조용히)
     if (d.source === 'auto') notifyDepositToAdmin_(d, floor, amt, row);
   }
+  // 클라이언트 폴링 감지용: 입금 상태 변경 시각 기록
+  try { PropertiesService.getScriptProperties().setProperty('depositTs', String(Date.now())); } catch (e) { }
   return json_({ ok: true, deposits: readDeposits_(sh.getRange(row, 1, 1, sh.getLastColumn()).getValues()[0]) });
 }
 

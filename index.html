@@ -846,6 +846,7 @@ async function load(){
     return;
   }
   await refresh(true);
+  startPingLoop_(); // 백그라운드 실시간 감지 시작
   if(data.people) [1,2,3].forEach(i=>$('n'+i).value=data.people[i-1]);
   updateMeterLabels();
   // 최신 검침점이 지난 정산 이후 것이면 '이번 검침'에 자동 반영
@@ -860,10 +861,10 @@ async function load(){
   renderHist();
 }
 
-/* 구글 시트에서 전체 기록 재수신 (시트 = 진실의 원본) */
-async function refresh(initial){
-  busy(initial?'구글 시트에서 기록을 불러오는 중…':'구글 시트와 동기화하는 중…');
-  setConnStat('busy');
+/* 구글 시트에서 전체 기록 재수신 (시트 = 진실의 원본)
+ * silent: true 이면 busy 표시·상태 변경 없이 조용히 갱신 (폴링용) */
+async function refresh(initial, silent){
+  if(!silent){ busy(initial?'구글 시트에서 기록을 불러오는 중…':'구글 시트와 동기화하는 중…'); setConnStat('busy'); }
   try{
     const j=await (await fetch(data.hook+'?key='+encodeURIComponent(data.key||''))).json();
     if(!j||!j.ok) throw new Error(j&&j.error||'응답 오류');
@@ -901,18 +902,47 @@ async function refresh(initial){
     if(remoteHist.length&&$('result').style.display==='block') renderPayBoard(remoteHist[0]);
     // 상시 노출 관리자 대시보드
     renderPayDashboard();
-    busyDone(initial?'✓ 시트 불러오기 완료':'✓ 동기화 완료');
+    if(!silent) busyDone(initial?'✓ 시트 불러오기 완료':'✓ 동기화 완료');
     renderHist();
     updateMeterLabels(); renderCloseSel();
     return true;
   }catch(e){
-    busyDone('⚠ 구글 시트에 연결하지 못했습니다');
-    setConnStat('fail');
-    $('prevInfo').textContent='구글 시트 연결 실패 — 인터넷 연결과 웹 앱 URL을 확인해 주세요. (Claude 미리보기 안에서는 외부 연결이 차단되어, 파일을 직접 열어야 동작합니다)';
+    if(!silent){ busyDone('⚠ 구글 시트에 연결하지 못했습니다'); setConnStat('fail'); }
+    if(!silent) $('prevInfo').textContent='구글 시트 연결 실패 — 인터넷 연결과 웹 앱 URL을 확인해 주세요. (Claude 미리보기 안에서는 외부 연결이 차단되어, 파일을 직접 열어야 동작합니다)';
     renderHist();
     return false;
   }
 }
+/* ── 실시간 입금 감지 (경량 ping 폴링) ──
+ * 3초마다 서버의 depositTs만 체크 → 변경되면 refresh() 조용히 실행
+ * 탭 숨겨지면 정지, 다시 보이면 재개 */
+let lastPingTs=0;
+let pingTimer=null;
+async function pingCheck_(){
+  if(document.hidden) return;
+  if(!data.hook) return;
+  try{
+    const j=await(await fetch(data.hook+'?ping=1')).json();
+    if(!j||!j.ok) return;
+    const ts=Number(j.ts||0);
+    if(lastPingTs===0){ lastPingTs=ts; return; } // 최초 실행: 기준선만 설정
+    if(ts>lastPingTs){
+      lastPingTs=ts;
+      await refresh(false,true); // silent refresh
+    }
+  }catch(e){ /* 조용히 무시 */ }
+}
+function startPingLoop_(){
+  stopPingLoop_();
+  pingCheck_(); // 즉시 한 번
+  pingTimer=setInterval(pingCheck_,3000);
+}
+function stopPingLoop_(){ if(pingTimer){ clearInterval(pingTimer); pingTimer=null; } }
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden) stopPingLoop_();
+  else startPingLoop_();
+});
+
 function normDate(d){
   const m=String(d==null?'':d).match(/(\d{4})\D+?(\d{1,2})\D+?(\d{1,2})/);
   if(m) return m[1]+'-'+String(+m[2]).padStart(2,'0')+'-'+String(+m[3]).padStart(2,'0');
