@@ -1,4 +1,4 @@
-/*
+﻿/*
  * 수도요금 정산 — 구글 시트 연동 스크립트 (v5: 구성원 관리 확장)
  *
  * v5 변경점: 구성원 탭에 "구분(관리자/구성원)"·"계좌" 칼럼 추가 (기존 시트 자동 보강),
@@ -188,9 +188,18 @@ function floorNum_(s) {
   return m ? Number(m[1]) : 0;
 }
 
+/** 금액 안전 변환 — Date나 이상값을 걸러냄
+ * 1억원 초과는 오류로 간주 (실용상 그 이상 청구액은 없음)
+ */
+function safeAmount_(v) {
+  if (v instanceof Date) return 0;
+  const n = Number(v);
+  if (!isFinite(n) || n < 0 || n > 100000000) return 0;
+  return n;
+}
+
 /** 특정 행에서 각 층의 입금 상태 배열 반환 */
 function readDeposits_(row) {
-  // row: 0-based array. PAY_COL_BASE는 1-based → row 인덱스는 PAY_COL_BASE-1
   const base = PAY_COL_BASE - 1;
   const out = [];
   for (let i = 0; i < 3; i++) {
@@ -200,7 +209,7 @@ function readDeposits_(row) {
       paid: st.indexOf('Y') === 0 || st.indexOf('자동') >= 0 || st === '수동',
       auto: st.indexOf('자동') >= 0,
       when: formatDate_(row[base + i * 3 + 1]),
-      amount: Number(row[base + i * 3 + 2]) || 0
+      amount: safeAmount_(row[base + i * 3 + 2])
     });
   }
   return out;
@@ -252,7 +261,7 @@ function doGet(e) {
     const rows = sh.getRange(2, 1, last - 1, lastCol).getValues();
     out.history = rows.map(function (r) {
       const amt = [Number(r[6]), Number(r[10]), Number(r[14])];
-      let finals = [Number(r[17]), Number(r[18]), Number(r[19])];
+      let finals = [safeAmount_(r[17]), safeAmount_(r[18]), safeAmount_(r[19])];
       if (!(finals[0] || finals[1] || finals[2])) finals = amt; // 구버전 행 호환
       return {
         date: formatDate_(r[0]), prevDate: formatDate_(r[1]), total: Number(r[2]),
@@ -289,11 +298,32 @@ function doGet(e) {
   return json_(out);
 }
 
+/** 디버그 로그 시트에 한 줄 추가 (Cloud 로그 안 뜰 때 대안) */
+function debugLog_(tag, msg) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sh = ss.getSheetByName('디버그로그');
+    if (!sh) {
+      sh = ss.insertSheet('디버그로그');
+      sh.appendRow(['시각', '태그', '내용']);
+      sh.setFrozenRows(1);
+    }
+    sh.appendRow([new Date(), String(tag || ''), String(msg || '').slice(0, 500)]);
+    // 오래된 로그 정리 (최근 200줄만 유지)
+    const last = sh.getLastRow();
+    if (last > 202) sh.deleteRows(2, last - 202);
+  } catch (e) { /* 로깅 실패해도 무시 */ }
+}
+
 /** POST: 정산 저장 → 시트 기록 + 사진 보관 + 메일 발송 */
 function doPost(e) {
   try {
+    const rawBody = (e && e.postData ? e.postData.contents : '(no body)');
+    debugLog_('doPost', 'body=' + rawBody);
+    console.log('[doPost] raw body: ' + rawBody);
     const d = JSON.parse(e.postData.contents);
-    if (!checkKey_(d.key)) return json_({ ok: false, error: 'unauthorized' });
+    debugLog_('doPost', 'kind=' + d.kind + ' keyTail=' + (d.key ? String(d.key).slice(-2) : '(none)'));
+    if (!checkKey_(d.key)) { debugLog_('doPost', 'unauthorized'); return json_({ ok: false, error: 'unauthorized', hint: 'key mismatch' }); }
 
     // 매월 중간 검침: 검침값·사진만 기록 (메일 발송·백업 없음)
     if (d.kind === 'mid') return saveMid_(d);
@@ -470,7 +500,7 @@ function markPaid_(d, unmark) {
   } else {
     const src = d.source === 'auto' ? '자동' : '수동';
     const when = d.when ? new Date(d.when) : new Date();
-    const amt = Number(d.amount) || 0;
+    const amt = safeAmount_(d.amount);
     sh.getRange(row, base, 1, 3).setValues([[src, when, amt]]);
     // 관리자에게 확인 메일 (수동일 때는 조용히)
     if (d.source === 'auto') notifyDepositToAdmin_(d, floor, amt, row);
@@ -576,19 +606,22 @@ function notifyAdminConfirmNeeded_(parsed, reasonLabel, candidateSummary, finals
 
 /** MacroDroid 웹훅: 카뱅 알림 텍스트를 받아 자동 매칭 (안전 우선) */
 function depositWebhook_(d) {
+  debugLog_('deposit', 'text=' + d.text);
   const parsed = parseKakaoBank_(d.text);
+  debugLog_('deposit', 'parsed=' + JSON.stringify(parsed));
   if (!parsed) return json_({ ok: false, error: 'parse failed', text: d.text });
   const sh = getSheet();
   const last = sh.getLastRow();
-  if (last < 2) return json_({ ok: false, error: 'no settlement' });
+  if (last < 2) { debugLog_('deposit', 'no settlement'); return json_({ ok: false, error: 'no settlement' }); }
   const row = last;
   const r = sh.getRange(row, 1, 1, sh.getLastColumn()).getValues()[0];
   const savedAt = r[25] instanceof Date ? r[25].getTime() : 0;
-  if (savedAt && Date.now() < savedAt) return json_({ ok: false, error: 'before settlement' });
+  if (savedAt && Date.now() < savedAt) { debugLog_('deposit', 'before settlement'); return json_({ ok: false, error: 'before settlement' }); }
   const members = getMembers_();
   const adminF = floorNum_(adminFloor_());
   const deposits = readDeposits_(r);
-  const finals = [Number(r[17]), Number(r[18]), Number(r[19])];
+  const finals = [safeAmount_(r[17]), safeAmount_(r[18]), safeAmount_(r[19])];
+  debugLog_('deposit', 'adminFloor=' + adminF + ' finals=' + JSON.stringify(finals) + ' paid=' + JSON.stringify(deposits.map(function(x){return x.paid;})));
 
   // 0단계: 층수 힌트가 있으면 그 층으로 좁힘 ("2층김철수" 같이 이체 시 표시명·메모에 층 표기)
   const allowedFloors = parsed.floorHint
@@ -635,6 +668,7 @@ function depositWebhook_(d) {
     else reason = '입금자명 없음 + 금액 동일 층 다중 (' + amtMatch.join(', ') + '층)';
   }
 
+  debugLog_('deposit', 'allow=' + JSON.stringify(allowedFloors) + ' amt=' + JSON.stringify(amtMatch) + ' name=' + JSON.stringify(nameMatch) + ' chosen=' + chosen + ' reason=' + reason);
   if (chosen > 0) {
     return markPaid_({
       origDate: formatDate_(r[0]),
@@ -676,7 +710,7 @@ function checkOverdue() {
   const mm = Number(String(billMonth).split('-')[1]);
   const acct = adminAccount_();
   const members = getMembers_();
-  const finals = [Number(r[17]), Number(r[18]), Number(r[19])];
+  const finals = [safeAmount_(r[17]), safeAmount_(r[18]), safeAmount_(r[19])];
   // 각 미납 세대에 개별 리마인더
   overdue.forEach(function (o) {
     const m = members.find(function (mm) { return floorNum_(mm.floor) === o.floor && mm.email && mm.mail; });
@@ -790,3 +824,4 @@ function formatDate_(v) {
   const m = String(v || '').match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
   return m ? m[1] + '-' + pad2_(m[2]) + '-' + pad2_(m[3]) : '';
 }
+

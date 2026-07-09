@@ -740,20 +740,27 @@ function renderStats(){
   const today=new Date();
   const dstr=d=>{const p=String(d).split('-');return (+p[1])+'/'+(+p[2]);};
   const chips=[];
-  if(last){
+  const h=histSrc()[0];
+  // 마지막 검침이 마지막 정산 마감과 같은 날이면 통합 표시
+  const sameAsSettle=!!(h&&last&&last.date===h.date);
+  if(last&&!sameAsSettle){
     const days=Math.round((today-new Date(last.date))/86400000);
-    chips.push(`<div class="chip">📷 마지막 검침<b>${dstr(last.date)} <span style="font-weight:400;font-size:11.5px;color:var(--sub)">(${days<=0?'오늘':days+'일 전'})</span></b></div>`);
+    const kind=last.mid?'중간검침':'검침';
+    chips.push(`<div class="chip">📷 마지막 ${kind}<b>${dstr(last.date)} <span style="font-weight:400;font-size:11.5px;color:var(--sub)">(${days<=0?'오늘':days+'일 전'})</span></b></div>`);
+  }else if(!last){
+    chips.push('<div class="chip">📷 마지막 검침<b>아직 없음</b></div>');
+  }
+  if(last){
     const nd=new Date(last.date+'T00:00:00'); nd.setMonth(nd.getMonth()+1);
     const nds=nd.getFullYear()+'-'+String(nd.getMonth()+1).padStart(2,'0')+'-'+String(nd.getDate()).padStart(2,'0');
     const due=Math.ceil((nd-today)/86400000);
     chips.push(`<div class="chip">⏰ 다음 검침 권장<b>${dstr(nds)} <span style="font-weight:400;font-size:11.5px;color:${due<0?'var(--warn)':'var(--sub)'}">(${due<0?(-due)+'일 지남':due===0?'오늘':'D-'+due})</span></b></div>`);
-  }else{
-    chips.push('<div class="chip">📷 마지막 검침<b>아직 없음</b></div>');
   }
-  const h=histSrc()[0];
   if(h){
     const bm=(h.billMonth||h.date.slice(0,7)).split('-');
-    chips.push(`<div class="chip">🧾 마지막 정산<b>${+bm[1]}월분 · ${dstr(h.date)} 마감</b></div>`);
+    const settleDays=Math.round((today-new Date(h.date))/86400000);
+    const suffix=sameAsSettle?` <span style="font-weight:400;font-size:11.5px;color:var(--sub)">(${settleDays<=0?'오늘':settleDays+'일 전'} · 검침 겸함)</span>`:'';
+    chips.push(`<div class="chip">🧾 마지막 정산<b>${+bm[1]}월분 · ${dstr(h.date)} 마감${suffix}</b></div>`);
   }else{
     chips.push('<div class="chip">🧾 마지막 정산<b>아직 없음</b></div>');
   }
