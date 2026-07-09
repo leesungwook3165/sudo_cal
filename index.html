@@ -169,6 +169,30 @@
   .mem-meta{ display:flex; justify-content:space-between; align-items:center; gap:10px;
     margin-top:10px; padding-top:8px; border-top:1px dashed var(--line); font-size:12.5px; color:var(--sub) }
   .mem-row input,.mem-row select{ margin:0; padding:9px 10px; font-size:14px; min-width:0; width:100%; box-sizing:border-box }
+  /* 입금 대시보드 */
+  .pay-board{ margin-top:10px; border:1px solid var(--line); border-radius:12px; background:#F4F8FB; overflow:hidden }
+  .pay-board-head{ display:flex; justify-content:space-between; align-items:center;
+    padding:9px 12px; background:#E9F0F5; font-size:13px; color:var(--water-deep); font-weight:800 }
+  .pay-board-head .pb-prog{ font-size:12px; color:var(--sub); font-weight:600 }
+  .pay-row{ display:grid; grid-template-columns:38px minmax(0,1fr) auto; gap:8px; align-items:center;
+    padding:9px 12px; border-top:1px solid var(--line); background:#fff }
+  .pay-row.paid{ background:#EEF6EF }
+  .pay-row.excluded{ background:#F6F6F6; color:var(--sub) }
+  .pay-row .p-floor{ font-size:13px; font-weight:800; color:var(--water-deep) }
+  .pay-row .p-body{ font-size:13px }
+  .pay-row .p-body .p-name{ font-weight:700 }
+  .pay-row .p-body .p-amt{ color:var(--sub); font-variant-numeric:tabular-nums }
+  .pay-row .p-body .p-meta{ font-size:11.5px; color:var(--sub); margin-top:2px }
+  .pay-row .p-badge{ display:inline-block; font-size:11px; font-weight:800; padding:2px 8px; border-radius:8px }
+  .pay-row .p-badge.auto{ background:#0F5E92; color:#fff }
+  .pay-row .p-badge.manual{ background:var(--ok); color:#fff }
+  .pay-row .p-badge.wait{ background:#DDE7EF; color:var(--water-deep) }
+  .pay-row .p-badge.exc{ background:#CCC; color:#fff }
+  .pay-row .p-actions{ display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end }
+  .pay-row .p-actions .btn-mini{ border:1px solid var(--line); background:#fff; color:var(--water-deep);
+    border-radius:8px; padding:5px 10px; font-size:12px; font-weight:700; cursor:pointer; white-space:nowrap }
+  .pay-row .p-actions .btn-mini.primary{ background:var(--ok); color:#fff; border-color:var(--ok) }
+  .pay-row .p-actions .btn-mini.warn{ background:#fff; color:var(--warn); border-color:var(--warn) }
   .mem-toolbar{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:10px;
     padding:8px 10px; background:#F4F8FB; border:1px solid var(--line); border-radius:10px }
   .mem-toolbar .edit-btn{ font-size:12px; padding:5px 10px }
@@ -396,6 +420,7 @@
   <div class="note" id="checkNote"></div>
   <div class="copybox" id="copybox"></div>
   <div id="photoLinks" style="display:none;margin-top:8px;font-size:13px;background:#F4F8FB;border:1px solid var(--line);border-radius:10px;padding:10px"></div>
+  <div id="payBoard" class="pay-board" style="display:none"></div>
   <button class="btn ghost" onclick="copyText()">가족방에 붙여넣을 문구 복사</button>
   <button class="btn ghost" id="smsBtn" style="display:none" onclick="openSmsPreview()">📱 구성원에게 문자 보내기</button>
   <button class="btn" id="saveBtn" onclick="save()">이번 검침값 저장 (다음 정산 준비)</button>
@@ -738,7 +763,10 @@ async function refresh(initial){
     if(j.phones&&j.phones.length) data.phones=j.phones;
     if(j.members) { data.members=JSON.parse(JSON.stringify(j.members)); data.membersFromSheet=j.members; renderMembers(); }
     data.account=j.account||''; data.accountOwner=j.accountOwner||'';
+    data.adminFloor=String(j.adminFloor||'');
     if(j.sheetUrl) updateSheetLink(j.sheetUrl);
+    // 저장된 정산이 있으면 대시보드 갱신 (최신 회차 기준)
+    if(remoteHist.length&&$('result').style.display==='block') renderPayBoard(remoteHist[0]);
     busyDone(initial?'✓ 시트 불러오기 완료':'✓ 동기화 완료');
     renderHist();
     updateMeterLabels(); renderCloseSel();
@@ -1143,6 +1171,7 @@ function calc(){
   txt+='\n※ 시청 검침일과 자체 검침일이 달라 고지서 톤수와 층별 합계는 다를 수 있습니다. 금액은 비율 배분이라 오차 없이 정산되며, 구간 차이는 다음 정산에 자동 반영됩니다.';
   $('copybox').textContent=txt;
   const pl=$('photoLinks'); if(pl){ pl.style.display='none'; pl.innerHTML=''; }
+  const pb=$('payBoard'); if(pb){ pb.style.display='none'; pb.innerHTML=''; }
 
   lastCalc={date,total,billMonth,use,amt,prev,curr,sum,finals,extraPer,extraSum,split:splitLabel,
     extras:extras.map(x=>({name:x.name,amt:x.amt,mode:x.mode,month:x.month,per:x.per})),
@@ -1152,6 +1181,88 @@ function calc(){
   if(data.phones&&data.phones.length) $('smsBtn').style.display='block';
   $('saveBtn').textContent='이번 검침값 저장 (다음 정산 준비)';
   $('result').scrollIntoView({behavior:'smooth'});
+}
+
+/* ── 입금 대시보드 (정산 결과) ── */
+function payMemberFor(floor){
+  return (data.members||[]).find(m=>{
+    const mm=String(m.floor||'').match(/([123])/);
+    return mm&&+mm[1]===floor;
+  })||null;
+}
+function renderPayBoard(h){
+  const box=$('payBoard'); if(!box) return;
+  if(!h||!h.date){ box.style.display='none'; box.innerHTML=''; return; }
+  const adminF=(data.adminFloor||'').match(/([123])/);
+  const adminNum=adminF?+adminF[1]:0;
+  const deps=h.deposits||[{floor:1,paid:false},{floor:2,paid:false},{floor:3,paid:false}];
+  const finals=h.finals||h.amt||[0,0,0];
+  const target=3-(adminNum?1:0);
+  const paidCount=deps.filter(d=>d.paid&&d.floor!==adminNum).length;
+  const mm=+(h.billMonth||h.date).slice(5,7);
+  const rows=[1,2,3].map(f=>{
+    const d=deps[f-1]||{floor:f,paid:false};
+    const owed=finals[f-1]||0;
+    const mem=payMemberFor(f);
+    const name=mem?mem.name:'';
+    if(f===adminNum){
+      return `<div class="pay-row excluded">
+        <div class="p-floor">${f}층</div>
+        <div class="p-body"><span class="p-name">${esc_(name||'관리자')}</span> <span class="p-badge exc">관리자 · 제외</span>
+          <div class="p-meta">본인 부담분은 시스템 확인 대상에서 제외됩니다</div></div>
+        <div class="p-actions"></div>
+      </div>`;
+    }
+    if(d.paid){
+      const badge=d.auto?'<span class="p-badge auto">자동확인</span>':'<span class="p-badge manual">수동확인</span>';
+      const meta=d.when?`${d.when}${d.amount?` · ${d.amount.toLocaleString()}원 입금`:''}`:'';
+      return `<div class="pay-row paid">
+        <div class="p-floor">${f}층</div>
+        <div class="p-body"><span class="p-name">${esc_(name||'')}</span> <span class="p-amt">청구 ${owed.toLocaleString()}원</span> ${badge}
+          ${meta?`<div class="p-meta">${meta}</div>`:''}</div>
+        <div class="p-actions">
+          <button class="btn-mini warn" onclick="payUnmark('${h.date}',${f})">되돌리기</button>
+        </div>
+      </div>`;
+    }
+    return `<div class="pay-row">
+      <div class="p-floor">${f}층</div>
+      <div class="p-body"><span class="p-name">${esc_(name||'')}</span> <span class="p-amt">${owed.toLocaleString()}원</span> <span class="p-badge wait">대기</span></div>
+      <div class="p-actions">
+        <button class="btn-mini primary" onclick="payMark('${h.date}',${f},${owed})">입금확인</button>
+      </div>
+    </div>`;
+  }).join('');
+  box.innerHTML=`<div class="pay-board-head"><span>📥 ${mm}월분 입금 현황</span><span class="pb-prog">${paidCount}/${target} 완료</span></div>${rows}`;
+  box.style.display='block';
+}
+async function payMark(origDate,floor,owed){
+  if(!data.hook||!data.key||!isAdmin) return;
+  const input=prompt(`${floor}층 실제 입금액 (원)\n\n기본값(부담액): ${owed.toLocaleString()}원`,String(owed));
+  if(input===null) return;
+  const amount=Number(String(input).replace(/[^0-9]/g,''))||owed;
+  try{
+    busy('입금 확인 처리 중…');
+    const j=await(await fetch(data.hook,{method:'POST',body:JSON.stringify({key:data.key,kind:'markPaid',origDate,floor,amount,source:'manual'})})).json();
+    if(!j.ok) throw new Error(j.error||'실패');
+    busyDone('✓ 입금 확인 완료');
+    await refresh();
+    const h=(remoteHist||[]).find(x=>x.date===origDate);
+    renderPayBoard(h);
+  }catch(e){ busyDone(); alert('입금 확인 저장 실패: '+e.message); }
+}
+async function payUnmark(origDate,floor){
+  if(!data.hook||!data.key||!isAdmin) return;
+  if(!confirm(`${floor}층 입금 확인을 되돌릴까요?`)) return;
+  try{
+    busy('되돌리는 중…');
+    const j=await(await fetch(data.hook,{method:'POST',body:JSON.stringify({key:data.key,kind:'markUnpaid',origDate,floor})})).json();
+    if(!j.ok) throw new Error(j.error||'실패');
+    busyDone('✓ 되돌렸습니다');
+    await refresh();
+    const h=(remoteHist||[]).find(x=>x.date===origDate);
+    renderPayBoard(h);
+  }catch(e){ busyDone(); alert('되돌리기 실패: '+e.message); }
 }
 
 function applyPhotoLinks(urls){
@@ -1232,7 +1343,13 @@ async function save(){
     $('extraList').innerHTML='';
     [1,2,3].forEach(i=>$('c'+i).value='');
     if(editing){ editing=null; $('editBanner').style.display='none'; }
+    const savedDate=lastCalc&&lastCalc.date;
     await refresh();
+    // 저장된 회차 기준으로 입금 대시보드 표시
+    if(savedDate){
+      const h=(remoteHist||[]).find(x=>x.date===savedDate);
+      if(h) renderPayBoard(h);
+    }
     updatePeriod(); liveCheck();
   }catch(e){
     busyDone();

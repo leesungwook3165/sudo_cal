@@ -79,6 +79,13 @@ function backupNow() {
   }
 }
 
+/** 정산기록 탭 컬럼 순서 (인덱스는 1-based)
+ * 29~40: 입금 추적 컬럼 (v6 추가 — 구버전 시트 자동 보강)
+ */
+const PAY_COL_BASE = 29; // 29:1층입금여부 30:1층입금일 31:1층실입금액 32:2층… 35:3층… 38:리마인더발송일 39:자동확인로그
+const PAY_HEADERS = ['1층입금여부','1층입금일','1층실입금액','2층입금여부','2층입금일','2층실입금액',
+  '3층입금여부','3층입금일','3층실입금액','리마인더발송일','자동확인로그'];
+
 /** 정산기록 탭 (없으면 생성) */
 function getSheet() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -92,8 +99,16 @@ function getSheet() {
       '3층이전', '3층이번', '3층사용량(㎥)', '3층부담액(원)',
       '추가비용합계(원)', '추가비용내역', '1층최종부담(원)', '2층최종부담(원)', '3층최종부담(원)',
       '고지서사진', '1층계량기사진', '2층계량기사진', '3층계량기사진', '추가증빙사진', '기록시각', '배분방식', '고지서월'
-    ]);
+    ].concat(PAY_HEADERS));
     sh.setFrozenRows(1);
+    sh.getRange('1:1').setFontWeight('bold');
+  }
+  // 구버전 시트: 입금 추적 컬럼(29~39)이 없으면 헤더 자동 추가
+  if (sh.getLastColumn() < PAY_COL_BASE + PAY_HEADERS.length - 1) {
+    for (let i = 0; i < PAY_HEADERS.length; i++) {
+      const col = PAY_COL_BASE + i;
+      if (sh.getRange(1, col).getValue() !== PAY_HEADERS[i]) sh.getRange(1, col).setValue(PAY_HEADERS[i]);
+    }
     sh.getRange('1:1').setFontWeight('bold');
   }
   return sh;
@@ -158,6 +173,36 @@ function adminAccount_() {
   return admins.length ? { account: admins[0].account, owner: admins[0].name } : null;
 }
 
+/** 관리자 층 (예: '1층') — 입금 대시보드에서 자동 제외 */
+function adminFloor_() {
+  const admins = getMembers_().filter(function (m) { return m.role === '관리자' && m.floor; });
+  return admins.length ? String(admins[0].floor) : '';
+}
+
+/** 층 이름을 1/2/3 으로 변환 */
+function floorNum_(s) {
+  const m = String(s || '').match(/([123])/);
+  return m ? Number(m[1]) : 0;
+}
+
+/** 특정 행에서 각 층의 입금 상태 배열 반환 */
+function readDeposits_(row) {
+  // row: 0-based array. PAY_COL_BASE는 1-based → row 인덱스는 PAY_COL_BASE-1
+  const base = PAY_COL_BASE - 1;
+  const out = [];
+  for (let i = 0; i < 3; i++) {
+    const st = String(row[base + i * 3] || '');
+    out.push({
+      floor: i + 1,
+      paid: st.indexOf('Y') === 0 || st.indexOf('자동') >= 0 || st === '수동',
+      auto: st.indexOf('자동') >= 0,
+      when: formatDate_(row[base + i * 3 + 1]),
+      amount: Number(row[base + i * 3 + 2]) || 0
+    });
+  }
+  return out;
+}
+
 /** 고지서 사진 폴더 */
 function getFolder() {
   const it = DriveApp.getFoldersByName(FOLDER_NAME);
@@ -200,7 +245,8 @@ function doGet(e) {
       .sort(function (a, b) { return a.date < b.date ? 1 : -1; }); // 최신이 앞
   }
   if (last >= 2) {
-    const rows = sh.getRange(2, 1, last - 1, 27).getValues();
+    const lastCol = Math.max(sh.getLastColumn(), PAY_COL_BASE + PAY_HEADERS.length - 1);
+    const rows = sh.getRange(2, 1, last - 1, lastCol).getValues();
     out.history = rows.map(function (r) {
       const amt = [Number(r[6]), Number(r[10]), Number(r[14])];
       let finals = [Number(r[17]), Number(r[18]), Number(r[19])];
@@ -216,8 +262,10 @@ function doGet(e) {
         photos: { bill: String(r[20] || ''), f1: String(r[21] || ''),
                   f2: String(r[22] || ''), f3: String(r[23] || '') },
         extraPhotos: String(r[24] || '').split('\n').filter(function (u) { return u; }),
+        savedAt: r[25] instanceof Date ? r[25].toISOString() : '',
         split: String(r[25] || '사용량'),
-        billMonth: formatMonth_(r[26]) || formatDate_(r[0]).slice(0, 7)
+        billMonth: formatMonth_(r[26]) || formatDate_(r[0]).slice(0, 7),
+        deposits: readDeposits_(r)
       };
     }).filter(function (h) { return h.date; })
       .reverse(); // 최신 회차가 앞으로
@@ -225,6 +273,7 @@ function doGet(e) {
       out.prev = { date: out.history[0].date, readings: out.history[0].curr };
     }
   }
+  out.adminFloor = adminFloor_();
   // 입금 안내용 계좌 — 가족 화면에도 표시되도록 항상 포함
   const acct = adminAccount_();
   if (acct) { out.account = acct.account; out.accountOwner = acct.owner; }
@@ -247,6 +296,9 @@ function doPost(e) {
     if (d.kind === 'mid') return saveMid_(d);
     if (d.kind === 'midDelete') return deleteMid_(d);
     if (d.kind === 'members') return saveMembers_(d);
+    if (d.kind === 'markPaid') return markPaid_(d, false);
+    if (d.kind === 'markUnpaid') return markPaid_(d, true);
+    if (d.kind === 'deposit') return depositWebhook_(d);
 
     // 항목별 사진 저장 (구버전 d.img는 고지서로 취급, x0/x1…은 추가비용 증빙)
     const slotName = { bill: '고지서', f1: '1층계량기', f2: '2층계량기', f3: '3층계량기' };
@@ -389,6 +441,197 @@ function deleteMid_(d) {
     }
   }
   return json_({ ok: true, deleted: false });
+}
+
+/** 특정 회차(origDate 기준) 행 번호 반환 (없으면 -1) */
+function findRowByDate_(sh, origDate) {
+  const last = sh.getLastRow();
+  if (last < 2) return -1;
+  const dates = sh.getRange(2, 1, last - 1, 1).getValues();
+  for (let i = dates.length - 1; i >= 0; i--) {
+    if (formatDate_(dates[i][0]) === origDate) return i + 2;
+  }
+  return -1;
+}
+
+/** 층별 입금 확인/취소 — 관리자 수동, source: 'manual' 또는 '자동' */
+function markPaid_(d, unmark) {
+  const floor = Number(d.floor);
+  if (!(floor >= 1 && floor <= 3)) return json_({ ok: false, error: 'bad floor' });
+  const sh = getSheet();
+  const row = findRowByDate_(sh, d.origDate);
+  if (row < 0) return json_({ ok: false, error: 'row not found' });
+  const base = PAY_COL_BASE + (floor - 1) * 3;
+  if (unmark) {
+    sh.getRange(row, base, 1, 3).setValues([['', '', '']]);
+  } else {
+    const src = d.source === 'auto' ? '자동' : '수동';
+    const when = d.when ? new Date(d.when) : new Date();
+    const amt = Number(d.amount) || 0;
+    sh.getRange(row, base, 1, 3).setValues([[src, when, amt]]);
+    // 관리자에게 확인 메일 (수동일 때는 조용히)
+    if (d.source === 'auto') notifyDepositToAdmin_(d, floor, amt, row);
+  }
+  return json_({ ok: true, deposits: readDeposits_(sh.getRange(row, 1, 1, sh.getLastColumn()).getValues()[0]) });
+}
+
+/** 관리자에게 입금 확인 알림 메일 */
+function notifyDepositToAdmin_(d, floor, amount, row) {
+  const admin = getMembers_().find(function (m) { return m.role === '관리자' && m.email; });
+  if (!admin) return;
+  const sh = getSheet();
+  const r = sh.getRange(row, 1, 1, sh.getLastColumn()).getValues()[0];
+  const billMonth = formatMonth_(r[26]) || formatDate_(r[0]).slice(0, 7);
+  const mm = Number(String(billMonth).split('-')[1]);
+  const deposits = readDeposits_(r);
+  const paidCount = deposits.filter(function (x) { return x.paid; }).length;
+  const adminF = floorNum_(adminFloor_());
+  const target = 3 - (adminF ? 1 : 0);
+  const subject = '[수도정산] ' + mm + '월분 ' + floor + '층 입금 확인 (' + paidCount + '/' + target + ')';
+  const body = mm + '월분 ' + floor + '층 입금이 확인되었습니다.\n\n'
+    + '입금액: ' + Number(amount).toLocaleString() + '원\n'
+    + '확인 방식: ' + (d.source === 'auto' ? '카카오뱅크 알림 자동 매칭' : '관리자 수동 확인') + '\n\n'
+    + '현재 진행: ' + paidCount + '/' + target + '\n'
+    + deposits.map(function (x) {
+      if (adminF === x.floor) return x.floor + '층: (관리자층 · 제외)';
+      return x.floor + '층: ' + (x.paid ? '✓ 확인 (' + x.when + ')' : '⏳ 대기');
+    }).join('\n') + '\n\n'
+    + '시트: ' + SpreadsheetApp.getActiveSpreadsheet().getUrl();
+  MailApp.sendEmail(admin.email, subject, body);
+}
+
+/** 카카오뱅크 알림 파싱 — MacroDroid가 알림 텍스트를 그대로 전달
+ * 확인된 카뱅 포맷: "07/09 11:29\n입금 100원\n이성욱 → 입출금통장(1703)\n잔액 24,193원"
+ * 그 외 은행 포맷 fallback 포함
+ */
+function parseKakaoBank_(text) {
+  const t = String(text || '');
+  if (t.indexOf('입금') < 0) return null; // 출금·이체 알림은 무시
+  // 금액 추출 — "입금 X원" 패턴 우선, 없으면 첫 "숫자+원"
+  const amMain = t.match(/입금\s*([\d,]+)\s*원/);
+  const am = amMain || t.match(/([\d,]+)\s*원/);
+  if (!am) return null;
+  const amount = Number(am[1].replace(/,/g, ''));
+  if (!amount) return null;
+  // 입금자명 추출 — 여러 카뱅/은행 포맷 우선순위
+  let sender = '';
+  // p0) 카뱅 고유 포맷: "입금 X원\n이름 → 계좌" ★ 가장 신뢰도 높음
+  const p0 = t.match(/입금\s*[\d,]+\s*원\s*\n?\s*([가-힣A-Za-z]{2,10})\s*→/);
+  // p1) "홍길동님이 ... 입금"
+  const p1 = t.match(/([가-힣A-Za-z]{2,10})님/);
+  // p2) "입금 X원 홍길동"
+  const p2 = t.match(/(?:입금)\s*[:.]?\s*[\d,]+\s*원\s*\n?\s*([가-힣A-Za-z]{2,10})/);
+  // p3) "홍길동 X원 입금"
+  const p3 = t.match(/([가-힣A-Za-z]{2,10})\s*[\d,]+\s*원\s*입금/);
+  sender = (p0 && p0[1]) || (p1 && p1[1]) || (p2 && p2[1]) || (p3 && p3[1]) || '';
+  return { amount: amount, sender: sender, rawText: t.slice(0, 200) };
+}
+
+/** MacroDroid 웹훅: 카뱅 알림 텍스트를 받아 자동 매칭 */
+function depositWebhook_(d) {
+  const parsed = parseKakaoBank_(d.text);
+  if (!parsed) return json_({ ok: false, error: 'parse failed', text: d.text });
+  const sh = getSheet();
+  const last = sh.getLastRow();
+  if (last < 2) return json_({ ok: false, error: 'no settlement' });
+  // 가장 최근(마지막) 정산 행에 대해 매칭 시도
+  const row = last;
+  const r = sh.getRange(row, 1, 1, sh.getLastColumn()).getValues()[0];
+  const savedAt = r[25] instanceof Date ? r[25].getTime() : 0;
+  // 정산 저장 이전의 입금은 무시 (이월 오인 방지)
+  if (savedAt && Date.now() < savedAt) {
+    return json_({ ok: false, error: 'before settlement' });
+  }
+  const members = getMembers_();
+  const adminF = floorNum_(adminFloor_());
+  const deposits = readDeposits_(r);
+  const finals = [Number(r[17]), Number(r[18]), Number(r[19])];
+  // 관리자층 제외, 이미 입금완료 제외, 금액 ±20원 오차, 이름 매칭
+  for (let f = 1; f <= 3; f++) {
+    if (adminF === f) continue;
+    if (deposits[f - 1].paid) continue;
+    const owed = finals[f - 1];
+    if (!owed) continue;
+    const diff = Math.abs(parsed.amount - owed);
+    if (diff > 20) continue;
+    // 이름 매칭 (부분 일치)
+    const floorMember = members.find(function (m) {
+      return floorNum_(m.floor) === f && m.name && parsed.sender && parsed.sender.indexOf(m.name) >= 0;
+    });
+    if (!floorMember && parsed.sender) continue; // 이름이 있는데 매칭 안 되면 건너뜀
+    // 매칭 성공 → 자동 확인
+    return markPaid_({
+      origDate: formatDate_(r[0]),
+      floor: f,
+      amount: parsed.amount,
+      source: 'auto',
+      when: new Date()
+    }, false);
+  }
+  // 자동 매칭 실패 — 관리자에게 알림 (수동 확인 요청)
+  const admin = getMembers_().find(function (m) { return m.role === '관리자' && m.email; });
+  if (admin) {
+    MailApp.sendEmail(admin.email, '[수도정산] 자동 매칭 실패 — 확인 필요',
+      '입금 알림을 받았지만 자동 매칭에 실패했습니다.\n'
+      + '입금자: ' + (parsed.sender || '(미상)') + '\n'
+      + '금액: ' + parsed.amount.toLocaleString() + '원\n\n'
+      + '원문: ' + parsed.rawText + '\n\n'
+      + '앱에서 수동으로 확인해 주세요.\n'
+      + SpreadsheetApp.getActiveSpreadsheet().getUrl());
+  }
+  return json_({ ok: false, error: 'no match', parsed: parsed });
+}
+
+/** 매일 오전 실행 — 3일 넘은 미납 세대에 리마인더 발송
+ * 설치: Apps Script 편집기 → 트리거 → 함수 checkOverdue → 시간 기반 → 오전 9~10시
+ */
+function checkOverdue() {
+  const sh = getSheet();
+  const last = sh.getLastRow();
+  if (last < 2) return;
+  const r = sh.getRange(last, 1, 1, sh.getLastColumn()).getValues()[0];
+  const savedAt = r[25] instanceof Date ? r[25].getTime() : 0;
+  if (!savedAt) return;
+  const days = (Date.now() - savedAt) / 86400000;
+  if (days < 3) return;
+  // 오늘 이미 발송했으면 스킵 (리마인더발송일 = PAY_COL_BASE + 9)
+  const remCol = PAY_COL_BASE + 9;
+  const remLast = r[remCol - 1];
+  const today = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  if (remLast instanceof Date && Utilities.formatDate(remLast, Session.getScriptTimeZone(), 'yyyy-MM-dd') === today) return;
+  const adminF = floorNum_(adminFloor_());
+  const deposits = readDeposits_(r);
+  const overdue = deposits.filter(function (x) { return !x.paid && x.floor !== adminF; });
+  if (!overdue.length) return;
+  const billMonth = formatMonth_(r[26]) || formatDate_(r[0]).slice(0, 7);
+  const mm = Number(String(billMonth).split('-')[1]);
+  const acct = adminAccount_();
+  const members = getMembers_();
+  const finals = [Number(r[17]), Number(r[18]), Number(r[19])];
+  // 각 미납 세대에 개별 리마인더
+  overdue.forEach(function (o) {
+    const m = members.find(function (mm) { return floorNum_(mm.floor) === o.floor && mm.email && mm.mail; });
+    if (!m) return;
+    const amt = finals[o.floor - 1];
+    const subj = '[수도정산] ' + mm + '월분 미납 안내 (D+' + Math.floor(days) + ')';
+    let body = m.name + '님, 안녕하세요.\n\n' + mm + '월분 수도요금 정산 후 3일이 지났지만 아직 입금이 확인되지 않았습니다.\n\n'
+      + '· 부담액: ' + amt.toLocaleString() + '원\n';
+    if (acct) body += '· 입금 계좌: ' + acct.account + ' (' + acct.owner + ')\n';
+    body += '\n확인 후 회신 부탁드립니다. 감사합니다.';
+    MailApp.sendEmail(m.email, subj, body);
+  });
+  // 관리자 요약 메일
+  const admin = getMembers_().find(function (m) { return m.role === '관리자' && m.email; });
+  if (admin) {
+    const summary = '⚠ ' + mm + '월분 D+' + Math.floor(days) + ' 미납 요약\n\n'
+      + overdue.map(function (o) {
+        const m = members.find(function (mm) { return floorNum_(mm.floor) === o.floor; });
+        return o.floor + '층 ' + (m ? m.name : '') + ' ' + finals[o.floor - 1].toLocaleString() + '원';
+      }).join('\n') + '\n\n' + SpreadsheetApp.getActiveSpreadsheet().getUrl();
+    MailApp.sendEmail(admin.email, '[수도정산] ' + mm + '월분 미납 요약 (D+' + Math.floor(days) + ')', summary);
+  }
+  // 리마인더 발송일 기록
+  sh.getRange(last, remCol).setValue(new Date());
 }
 
 /** 구성원 명단 저장 — 앱에서 편집한 전체 목록으로 교체 */
