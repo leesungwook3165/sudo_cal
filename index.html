@@ -169,6 +169,14 @@
   .mem-meta{ display:flex; justify-content:space-between; align-items:center; gap:10px;
     margin-top:10px; padding-top:8px; border-top:1px dashed var(--line); font-size:12.5px; color:var(--sub) }
   .mem-row input,.mem-row select{ margin:0; padding:9px 10px; font-size:14px; min-width:0; width:100%; box-sizing:border-box }
+  /* 내 층 입금 상태 (뷰어 모드) */
+  .my-pay{ margin-top:12px; background:#F4F8FB; border:1px solid var(--line); border-radius:10px; padding:10px 12px }
+  .my-pay-head{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px }
+  .my-pay-status{ background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13.5px; font-weight:700 }
+  .my-pay-status.paid{ background:#EAF4EE; border-color:#CBE5D5; color:var(--ok) }
+  .my-pay-status.wait{ background:#FDF6E9; border-color:#F0DFB5; color:var(--warn) }
+  .my-pay-status.excluded{ background:#F1F3F5; color:var(--sub); font-weight:600 }
+  .my-pay-meta{ font-size:12px; font-weight:400; color:var(--sub); margin-top:4px; line-height:1.5 }
   /* 입금 대시보드 */
   .pay-board{ margin-top:10px; border:1px solid var(--line); border-radius:12px; background:#F4F8FB; overflow:hidden }
   .pay-board-head{ display:flex; justify-content:space-between; align-items:center;
@@ -270,6 +278,7 @@
     <label style="margin-top:8px">관리자 키</label>
     <input type="password" id="adminKey" placeholder="스크립트의 ADMIN_KEY와 동일하게">
     <button class="btn ghost" onclick="saveHook()" id="hookBtn">저장하고 인증</button>
+    <button class="btn ghost admin-only" onclick="logoutAdmin()" id="logoutBtn" style="margin-top:6px;background:#FDF1EA;color:var(--warn);border-color:var(--warn)">🔓 관리자 모드 해제</button>
     <div id="connStat" class="hint" style="margin-top:8px"></div>
     <div class="hint">키가 맞아야 기록·수정이 가능합니다. URL·키는 이 브라우저에만 저장됩니다.</div>
   </div>
@@ -295,6 +304,15 @@
 
 <!-- 층별 구성원(조회) 화면 전용: 최근 정산 요약 -->
 <div class="card g-v viewer-only" id="viewerCard"></div>
+
+<!-- 관리자 전용: 최신 정산 입금 대시보드 (상시 노출) -->
+<div class="card admin-only" id="payDashboardCard" style="display:none">
+  <div class="card-head">
+    <h2>📥 이번 달 입금 현황</h2>
+    <select id="payDashSel" onchange="onPayDashChange()" style="max-width:200px"></select>
+  </div>
+  <div id="payDashboard"></div>
+</div>
 
 <!-- ① 검침 & 정산 (통합) -->
 <div class="card g-a admin-only">
@@ -523,6 +541,47 @@ function setConnStat(kind){
 }
 
 /* 층별 구성원(조회) 화면: 최근 정산 요약 카드 */
+function saveMyFloor(f){
+  try{ localStorage.setItem('sudo-myfloor',String(f||'')); }catch(e){}
+}
+function loadMyFloor(){
+  try{ return localStorage.getItem('sudo-myfloor')||''; }catch(e){ return ''; }
+}
+function renderMyPayStatus(h){
+  const myF=Number(loadMyFloor())||0;
+  const adminF=(data.adminFloor||'').match(/([123])/);
+  const adminNum=adminF?+adminF[1]:0;
+  const selHtml=[1,2,3].map(f=>`<option value="${f}" ${myF===f?'selected':''}>${f}층</option>`).join('');
+  let statusHtml='';
+  if(myF){
+    if(myF===adminNum){
+      statusHtml=`<div class="my-pay-status excluded">${myF}층은 관리자층으로 확인 대상에서 제외됩니다.</div>`;
+    }else{
+      const d=(h.deposits||[])[myF-1];
+      if(d&&d.paid){
+        const src=d.auto?'카카오뱅크 자동확인':'관리자 수동확인';
+        statusHtml=`<div class="my-pay-status paid">✅ 입금 확인 완료<div class="my-pay-meta">${d.when||''} · ${src}${d.amount?` · ${d.amount.toLocaleString()}원`:''}</div></div>`;
+      }else{
+        statusHtml=`<div class="my-pay-status wait">⏳ 아직 확인되지 않았습니다<div class="my-pay-meta">이체 후 반영까지 다소 시간이 걸릴 수 있어요 (수 분 ~ 수 시간). 반영이 늦으면 관리자에게 문의해 주세요.</div></div>`;
+      }
+    }
+  }else{
+    statusHtml=`<div class="my-pay-status wait">우리 층을 선택하면 이번 달 입금 확인 상태를 볼 수 있어요.</div>`;
+  }
+  return `<div class="my-pay">
+    <div class="my-pay-head">
+      <label style="margin:0;font-size:13px;color:var(--water-deep);font-weight:700">📥 내 층 이번 달 입금 상태</label>
+      <select onchange="onMyFloorChange(this.value)" style="max-width:110px;padding:6px 8px;font-size:13px">
+        <option value="">층 선택</option>${selHtml}
+      </select>
+    </div>
+    ${statusHtml}
+  </div>`;
+}
+function onMyFloorChange(v){
+  saveMyFloor(v);
+  renderViewerSummary();
+}
 function renderViewerSummary(){
   const el=$('viewerCard'); if(!el) return;
   const h=histSrc()[0];
@@ -542,6 +601,7 @@ function renderViewerSummary(){
     <div class="vgrid">${[0,1,2].map(i=>
       `<div class="vcell"><span>${i+1}층</span><b>${won(fin[i])}</b><small>${t(h.use[i])}㎥ 사용</small></div>`).join('')}</div>
     ${data.account?`<div style="margin-top:12px;background:#EAF4EE;border:1px solid #CBE5D5;border-radius:10px;padding:10px 12px;font-size:13.5px">💳 입금 계좌: <b>${data.account}</b>${data.accountOwner?' ('+data.accountOwner+')':''}</div>`:''}
+    ${renderMyPayStatus(h)}
     <div class="hint" style="margin-top:10px">검침값과 계량기·고지서 사진은 아래 <b>정산 기록</b>에서 확인할 수 있어요. 문의는 관리자(건물주)에게 연락해 주세요.</div>`;
 }
 
@@ -549,6 +609,17 @@ function setAdmin(on){
   isAdmin=on;
   document.body.classList.toggle('viewer',!on);
   $('lockBtn').textContent=on?'🔓 관리자 모드':'🔐 관리자';
+  if(typeof renderPayDashboard==='function') renderPayDashboard();
+}
+function logoutAdmin(){
+  if(!confirm('관리자 모드를 해제할까요? 저장된 관리자 키가 이 브라우저에서 지워집니다.')) return;
+  data.key='';
+  saveCfg();
+  setAdmin(false);
+  setConnStat(data.hook?'viewer':'none');
+  $('adminKey').value='';
+  $('adminPanel').style.display='none';
+  refresh();
 }
 async function toggleAdmin(){
   if(isAdmin){ // 이미 관리자면 설정 패널 열고 닫기
@@ -767,6 +838,8 @@ async function refresh(initial){
     if(j.sheetUrl) updateSheetLink(j.sheetUrl);
     // 저장된 정산이 있으면 대시보드 갱신 (최신 회차 기준)
     if(remoteHist.length&&$('result').style.display==='block') renderPayBoard(remoteHist[0]);
+    // 상시 노출 관리자 대시보드
+    renderPayDashboard();
     busyDone(initial?'✓ 시트 불러오기 완료':'✓ 동기화 완료');
     renderHist();
     updateMeterLabels(); renderCloseSel();
@@ -1190,9 +1263,8 @@ function payMemberFor(floor){
     return mm&&+mm[1]===floor;
   })||null;
 }
-function renderPayBoard(h){
-  const box=$('payBoard'); if(!box) return;
-  if(!h||!h.date){ box.style.display='none'; box.innerHTML=''; return; }
+function buildPayBoardHtml(h){
+  if(!h||!h.date) return '';
   const adminF=(data.adminFloor||'').match(/([123])/);
   const adminNum=adminF?+adminF[1]:0;
   const deps=h.deposits||[{floor:1,paid:false},{floor:2,paid:false},{floor:3,paid:false}];
@@ -1233,9 +1305,41 @@ function renderPayBoard(h){
       </div>
     </div>`;
   }).join('');
-  box.innerHTML=`<div class="pay-board-head"><span>📥 ${mm}월분 입금 현황</span><span class="pb-prog">${paidCount}/${target} 완료</span></div>${rows}`;
+  return `<div class="pay-board-head"><span>📥 ${mm}월분 입금 현황</span><span class="pb-prog">${paidCount}/${target} 완료</span></div>${rows}`;
+}
+function renderPayBoard(h){
+  const box=$('payBoard'); if(!box) return;
+  const html=buildPayBoardHtml(h);
+  if(!html){ box.style.display='none'; box.innerHTML=''; return; }
+  box.innerHTML=html;
   box.style.display='block';
 }
+/* 상시 노출 관리자 입금 대시보드 (최신 정산 중심, 이전 회차 선택 가능) */
+function renderPayDashboard(){
+  const card=$('payDashboardCard'); if(!card) return;
+  const list=remoteHist||[];
+  if(!isAdmin||!list.length){ card.style.display='none'; return; }
+  const sel=$('payDashSel');
+  const currentDate=sel.value||list[0].date;
+  const adminF=(data.adminFloor||'').match(/([123])/);
+  const adminNum=adminF?+adminF[1]:0;
+  sel.innerHTML=list.slice(0,12).map(h=>{
+    const mm=+(h.billMonth||h.date).slice(5,7);
+    const deps=h.deposits||[];
+    const paid=deps.filter(d=>d.paid&&d.floor!==adminNum).length;
+    const target=3-(adminNum?1:0);
+    const badge=paid>=target?'✅':(paid>0?'🟡':'⏳');
+    return `<option value="${h.date}" ${h.date===currentDate?'selected':''}>${badge} ${mm}월분 (${h.date}) · ${paid}/${target}</option>`;
+  }).join('');
+  const h=list.find(x=>x.date===currentDate)||list[0];
+  const box=$('payDashboard');
+  box.className='pay-board';
+  box.style.display='block';
+  box.innerHTML=buildPayBoardHtml(h);
+  card.style.display='block';
+}
+function onPayDashChange(){ renderPayDashboard(); }
+
 async function payMark(origDate,floor,owed){
   if(!data.hook||!data.key||!isAdmin) return;
   const input=prompt(`${floor}층 실제 입금액 (원)\n\n기본값(부담액): ${owed.toLocaleString()}원`,String(owed));
