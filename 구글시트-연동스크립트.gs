@@ -562,20 +562,13 @@ function parseKakaoBank_(text) {
   };
 }
 
-/** 반올림 오차 허용 매칭
- * 실입금액이 부담액과 ±20원 이내이거나, 100/500/1000원 단위로 올린 값과 ±20원 이내면 매치
- * 반올림 매치는 실입금액 ≥ 부담액인 경우에만 (부족 매칭 방지)
- * 반환: {match: bool, roundedTo: 단위(0=정확, 100/500/1000)}
+/** 원 단위 정확 매칭
+ * 실입금액이 부담액과 ±20원 이내이면 매치 (은행 수수료 정도 허용)
+ * 반올림 매칭은 하지 않음 — 구성원에게 정확한 원 단위로 이체 요청
+ * 반환: {match: bool, roundedTo: 0}
  */
 function amountMatches_(actual, owed) {
   if (Math.abs(actual - owed) <= 20) return { match: true, roundedTo: 0 };
-  if (actual < owed) return { match: false, roundedTo: 0 };
-  const units = [100, 500, 1000];
-  for (let i = 0; i < units.length; i++) {
-    const u = units[i];
-    const rounded = Math.ceil(owed / u) * u;
-    if (Math.abs(actual - rounded) <= 20) return { match: true, roundedTo: u };
-  }
   return { match: false, roundedTo: 0 };
 }
 
@@ -790,7 +783,9 @@ function notifyMembers_(d, imgUrl) {
   }
   const acct = adminAccount_();
   if (acct) body += '\n입금 계좌: ' + acct.account + ' (' + acct.owner + ')\n';
-  body += '\n📱 상세 확인: ' + APP_URL;
+  body += '\n※ 위 부담액을 <원 단위까지 정확히> 이체해 주시면 자동으로 확인 처리됩니다.\n'
+       +  '  (반올림하지 마시고 정확한 금액으로 부탁드립니다)';
+  body += '\n\n📱 상세 확인: ' + APP_URL;
   body += '\n상세 내역(시트): ' + sheetUrl;
   if (imgUrl) body += '\n고지서 사진: ' + imgUrl;
 

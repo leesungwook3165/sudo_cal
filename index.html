@@ -653,6 +653,7 @@ function renderViewerSummary(){
     <div class="pipe" style="margin-top:10px">${pipe}</div>
     <div class="vgrid">${[0,1,2].map(i=>
       `<div class="vcell"><span>${i+1}층</span><b>${won(fin[i])}</b><small>${t(h.use[i])}㎥ 사용</small></div>`).join('')}</div>
+    <div class="hint" style="margin-top:8px;color:var(--warn);font-weight:600">💰 위 부담액을 <b>원 단위까지 정확히</b> 이체해 주시면 자동 확인됩니다 (반올림 X)</div>
     ${data.account?renderAccountBox_():''}
     ${renderMyPayStatus(h)}
     <div class="hint" style="margin-top:10px">검침값과 계량기·고지서 사진은 아래 <b>정산 기록</b>에서 확인할 수 있어요. 문의는 관리자(건물주)에게 연락해 주세요.</div>`;
@@ -1309,6 +1310,7 @@ function calc(){
       +(extraSum>0?` (수도 ${won(amt[i])}+추가 ${won(extraPer[i])})`:'');
   }
   txt+='\n(계량기 사진 첨부)';
+  txt+='\n\n💰 위 부담액을 <원 단위까지 정확히> 이체해 주시면 자동으로 확인 처리됩니다.';
   txt+='\n※ 시청 검침일과 자체 검침일이 달라 고지서 톤수와 층별 합계는 다를 수 있습니다. 금액은 비율 배분이라 오차 없이 정산되며, 구간 차이는 다음 정산에 자동 반영됩니다.';
   $('copybox').textContent=txt;
   const pl=$('photoLinks'); if(pl){ pl.style.display='none'; pl.innerHTML=''; }
