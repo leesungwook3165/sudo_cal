@@ -321,7 +321,15 @@ function doPost(e) {
     const rawBody = (e && e.postData ? e.postData.contents : '(no body)');
     debugLog_('doPost', 'body=' + rawBody);
     console.log('[doPost] raw body: ' + rawBody);
-    const d = JSON.parse(e.postData.contents);
+    // MacroDroid가 카뱅 알림 여러 줄 텍스트를 그대로 넣으면 JSON이 깨지므로 이스케이프 처리
+    let d;
+    try {
+      d = JSON.parse(rawBody);
+    } catch (parseErr) {
+      const safeBody = rawBody.replace(/\r/g, '\\r').replace(/\n/g, '\\n').replace(/\t/g, '\\t');
+      debugLog_('doPost', 'JSON 재파싱 시도 (개행 이스케이프)');
+      d = JSON.parse(safeBody);
+    }
     debugLog_('doPost', 'kind=' + d.kind + ' keyTail=' + (d.key ? String(d.key).slice(-2) : '(none)'));
     if (!checkKey_(d.key)) { debugLog_('doPost', 'unauthorized'); return json_({ ok: false, error: 'unauthorized', hint: 'key mismatch' }); }
 
