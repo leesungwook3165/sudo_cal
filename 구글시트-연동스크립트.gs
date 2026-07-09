@@ -40,6 +40,9 @@ const FOLDER_NAME = '수도정산-고지서';
  *   키가 틀린 요청은 기록·조회 모두 거부됩니다. 변경 후 재배포 필수. */
 const ADMIN_KEY = '여기를-나만아는-키로-변경';
 
+/* 정산 앱 URL — 모든 알림 메일에 첨부됨 */
+const APP_URL = 'https://leesungwook3165.github.io/sudo_cal/';
+
 /* ── 자동 백업 설정 ──
  * 정산이 저장될 때마다 시트 전체 사본이 "수도정산-백업" 폴더에 날짜별로 생성됩니다.
  * BACKUP_EMAIL에 메일 주소를 넣으면(예: 본인의 다른 계정) 엑셀 파일도 함께 발송되어
@@ -496,90 +499,156 @@ function notifyDepositToAdmin_(d, floor, amount, row) {
       if (adminF === x.floor) return x.floor + '층: (관리자층 · 제외)';
       return x.floor + '층: ' + (x.paid ? '✓ 확인 (' + x.when + ')' : '⏳ 대기');
     }).join('\n') + '\n\n'
+    + '📱 상세 확인: ' + APP_URL + '\n'
     + '시트: ' + SpreadsheetApp.getActiveSpreadsheet().getUrl();
   MailApp.sendEmail(admin.email, subject, body);
 }
 
 /** 카카오뱅크 알림 파싱 — MacroDroid가 알림 텍스트를 그대로 전달
  * 확인된 카뱅 포맷: "07/09 11:29\n입금 100원\n이성욱 → 입출금통장(1703)\n잔액 24,193원"
- * 그 외 은행 포맷 fallback 포함
+ * 층수 힌트도 추출: 보내는 사람 표시명·메모에 "2층" 같은 표기가 있으면 우선 사용
  */
 function parseKakaoBank_(text) {
   const t = String(text || '');
   if (t.indexOf('입금') < 0) return null; // 출금·이체 알림은 무시
-  // 금액 추출 — "입금 X원" 패턴 우선, 없으면 첫 "숫자+원"
   const amMain = t.match(/입금\s*([\d,]+)\s*원/);
   const am = amMain || t.match(/([\d,]+)\s*원/);
   if (!am) return null;
   const amount = Number(am[1].replace(/,/g, ''));
   if (!amount) return null;
-  // 입금자명 추출 — 여러 카뱅/은행 포맷 우선순위
   let sender = '';
-  // p0) 카뱅 고유 포맷: "입금 X원\n이름 → 계좌" ★ 가장 신뢰도 높음
-  const p0 = t.match(/입금\s*[\d,]+\s*원\s*\n?\s*([가-힣A-Za-z]{2,10})\s*→/);
-  // p1) "홍길동님이 ... 입금"
+  const p0 = t.match(/입금\s*[\d,]+\s*원\s*\n?\s*([가-힣A-Za-z0-9]{2,15})\s*→/);
   const p1 = t.match(/([가-힣A-Za-z]{2,10})님/);
-  // p2) "입금 X원 홍길동"
-  const p2 = t.match(/(?:입금)\s*[:.]?\s*[\d,]+\s*원\s*\n?\s*([가-힣A-Za-z]{2,10})/);
-  // p3) "홍길동 X원 입금"
+  const p2 = t.match(/(?:입금)\s*[:.]?\s*[\d,]+\s*원\s*\n?\s*([가-힣A-Za-z0-9]{2,15})/);
   const p3 = t.match(/([가-힣A-Za-z]{2,10})\s*[\d,]+\s*원\s*입금/);
   sender = (p0 && p0[1]) || (p1 && p1[1]) || (p2 && p2[1]) || (p3 && p3[1]) || '';
-  return { amount: amount, sender: sender, rawText: t.slice(0, 200) };
+  // 층수 힌트: 텍스트 어디든 "1층/2층/3층" 있으면 추출 (계좌번호 "1703" 같은 건 뒤에 층이 없으니 무관)
+  const floorHint = (t.match(/([123])\s*층/) || [])[1];
+  return {
+    amount: amount,
+    sender: sender,
+    floorHint: floorHint ? Number(floorHint) : 0,
+    rawText: t.slice(0, 200)
+  };
 }
 
-/** MacroDroid 웹훅: 카뱅 알림 텍스트를 받아 자동 매칭 */
+/** 반올림 오차 허용 매칭
+ * 실입금액이 부담액과 ±20원 이내이거나, 100/500/1000원 단위로 올린 값과 ±20원 이내면 매치
+ * 반올림 매치는 실입금액 ≥ 부담액인 경우에만 (부족 매칭 방지)
+ * 반환: {match: bool, roundedTo: 단위(0=정확, 100/500/1000)}
+ */
+function amountMatches_(actual, owed) {
+  if (Math.abs(actual - owed) <= 20) return { match: true, roundedTo: 0 };
+  if (actual < owed) return { match: false, roundedTo: 0 };
+  const units = [100, 500, 1000];
+  for (let i = 0; i < units.length; i++) {
+    const u = units[i];
+    const rounded = Math.ceil(owed / u) * u;
+    if (Math.abs(actual - rounded) <= 20) return { match: true, roundedTo: u };
+  }
+  return { match: false, roundedTo: 0 };
+}
+
+/** 관리자에게 자동 매칭 실패/애매 알림 */
+function notifyAdminConfirmNeeded_(parsed, reasonLabel, candidateSummary, finals, members, adminF) {
+  const admin = getMembers_().find(function (m) { return m.role === '관리자' && m.email; });
+  if (!admin) return;
+  const compareRows = [1, 2, 3].map(function (f) {
+    if (adminF === f) return f + '층: (관리자층 · 제외)';
+    const owed = finals[f - 1];
+    const diff = parsed.amount - owed;
+    const m = members.find(function (mm) { return floorNum_(mm.floor) === f; });
+    const name = m ? m.name : '';
+    const sign = diff === 0 ? '정확' : (diff > 0 ? '초과 ' + diff.toLocaleString() + '원' : '부족 ' + Math.abs(diff).toLocaleString() + '원');
+    return f + '층 ' + name + ' 부담액 ' + owed.toLocaleString() + '원 (' + sign + ')';
+  }).join('\n');
+  const body = '입금 알림을 받았지만 ' + reasonLabel + ' 자동 매칭이 안전하지 않아 보류했습니다.\n\n'
+    + '입금자: ' + (parsed.sender || '(파싱 실패)') + '\n'
+    + '입금액: ' + parsed.amount.toLocaleString() + '원\n\n'
+    + '── 각 층 비교 ──\n' + compareRows + '\n'
+    + (candidateSummary ? '\n' + candidateSummary + '\n' : '')
+    + '\n원문: ' + parsed.rawText + '\n\n'
+    + '앱에서 수동으로 확인해 주세요.\n'
+    + '📱 앱: ' + APP_URL + '\n'
+    + '시트: ' + SpreadsheetApp.getActiveSpreadsheet().getUrl();
+  MailApp.sendEmail(admin.email, '[수도정산] 자동 매칭 실패 — 확인 필요 (' + reasonLabel + ')', body);
+}
+
+/** MacroDroid 웹훅: 카뱅 알림 텍스트를 받아 자동 매칭 (안전 우선) */
 function depositWebhook_(d) {
   const parsed = parseKakaoBank_(d.text);
   if (!parsed) return json_({ ok: false, error: 'parse failed', text: d.text });
   const sh = getSheet();
   const last = sh.getLastRow();
   if (last < 2) return json_({ ok: false, error: 'no settlement' });
-  // 가장 최근(마지막) 정산 행에 대해 매칭 시도
   const row = last;
   const r = sh.getRange(row, 1, 1, sh.getLastColumn()).getValues()[0];
   const savedAt = r[25] instanceof Date ? r[25].getTime() : 0;
-  // 정산 저장 이전의 입금은 무시 (이월 오인 방지)
-  if (savedAt && Date.now() < savedAt) {
-    return json_({ ok: false, error: 'before settlement' });
-  }
+  if (savedAt && Date.now() < savedAt) return json_({ ok: false, error: 'before settlement' });
   const members = getMembers_();
   const adminF = floorNum_(adminFloor_());
   const deposits = readDeposits_(r);
   const finals = [Number(r[17]), Number(r[18]), Number(r[19])];
-  // 관리자층 제외, 이미 입금완료 제외, 금액 ±20원 오차, 이름 매칭
-  for (let f = 1; f <= 3; f++) {
-    if (adminF === f) continue;
-    if (deposits[f - 1].paid) continue;
-    const owed = finals[f - 1];
-    if (!owed) continue;
-    const diff = Math.abs(parsed.amount - owed);
-    if (diff > 20) continue;
-    // 이름 매칭 (부분 일치)
-    const floorMember = members.find(function (m) {
-      return floorNum_(m.floor) === f && m.name && parsed.sender && parsed.sender.indexOf(m.name) >= 0;
+
+  // 0단계: 층수 힌트가 있으면 그 층으로 좁힘 ("2층김철수" 같이 이체 시 표시명·메모에 층 표기)
+  const allowedFloors = parsed.floorHint
+    ? [parsed.floorHint].filter(function (f) { return f !== adminF && !deposits[f - 1].paid && finals[f - 1]; })
+    : [1, 2, 3].filter(function (f) { return f !== adminF && !deposits[f - 1].paid && finals[f - 1]; });
+
+  // 1단계: 금액 매칭 (반올림 허용)
+  const amtMatch = [];
+  const roundInfo = {};
+  allowedFloors.forEach(function (f) {
+    const m = amountMatches_(parsed.amount, finals[f - 1]);
+    if (m.match) { amtMatch.push(f); roundInfo[f] = m.roundedTo; }
+  });
+  if (!amtMatch.length) {
+    const rsn = parsed.floorHint
+      ? '층 힌트 ' + parsed.floorHint + '층인데 금액 불일치'
+      : '금액 불일치 (반올림 포함 대조)';
+    notifyAdminConfirmNeeded_(parsed, rsn, '', finals, members, adminF);
+    return json_({ ok: false, error: 'no amount match', parsed: parsed });
+  }
+
+  // 2단계: 이름 매칭 (2자 이상만)
+  const nameMatch = amtMatch.filter(function (f) {
+    return members.some(function (m) {
+      return floorNum_(m.floor) === f
+        && m.name && m.name.length >= 2
+        && parsed.sender && parsed.sender.indexOf(m.name) >= 0;
     });
-    if (!floorMember && parsed.sender) continue; // 이름이 있는데 매칭 안 되면 건너뜀
-    // 매칭 성공 → 자동 확인
+  });
+
+  // 3단계: 안전 결정
+  let chosen = -1;
+  let reason = '';
+  if (parsed.floorHint) {
+    // 층 힌트가 있으면 그 층에 금액이 맞기만 하면 인정 (강한 신호)
+    if (amtMatch.length === 1) chosen = amtMatch[0];
+    else reason = '층 힌트 있으나 후보 다중';
+  } else if (parsed.sender) {
+    if (nameMatch.length === 1) chosen = nameMatch[0];
+    else if (nameMatch.length === 0) reason = '이름 불일치';
+    else reason = '이름·금액 매칭 후보 다중 (' + nameMatch.join(', ') + '층)';
+  } else {
+    if (amtMatch.length === 1) chosen = amtMatch[0];
+    else reason = '입금자명 없음 + 금액 동일 층 다중 (' + amtMatch.join(', ') + '층)';
+  }
+
+  if (chosen > 0) {
     return markPaid_({
       origDate: formatDate_(r[0]),
-      floor: f,
+      floor: chosen,
       amount: parsed.amount,
       source: 'auto',
       when: new Date()
     }, false);
   }
-  // 자동 매칭 실패 — 관리자에게 알림 (수동 확인 요청)
-  const admin = getMembers_().find(function (m) { return m.role === '관리자' && m.email; });
-  if (admin) {
-    MailApp.sendEmail(admin.email, '[수도정산] 자동 매칭 실패 — 확인 필요',
-      '입금 알림을 받았지만 자동 매칭에 실패했습니다.\n'
-      + '입금자: ' + (parsed.sender || '(미상)') + '\n'
-      + '금액: ' + parsed.amount.toLocaleString() + '원\n\n'
-      + '원문: ' + parsed.rawText + '\n\n'
-      + '앱에서 수동으로 확인해 주세요.\n'
-      + SpreadsheetApp.getActiveSpreadsheet().getUrl());
-  }
-  return json_({ ok: false, error: 'no match', parsed: parsed });
+
+  // 자동 확정 안 함 — 관리자 판단 요청
+  const summary = '자동 매칭 보류 사유: ' + reason;
+  notifyAdminConfirmNeeded_(parsed, reason, summary, finals, members, adminF);
+  return json_({ ok: false, error: 'need review', reason: reason, parsed: parsed });
 }
 
 /** 매일 오전 실행 — 3일 넘은 미납 세대에 리마인더 발송
@@ -617,7 +686,8 @@ function checkOverdue() {
     let body = m.name + '님, 안녕하세요.\n\n' + mm + '월분 수도요금 정산 후 3일이 지났지만 아직 입금이 확인되지 않았습니다.\n\n'
       + '· 부담액: ' + amt.toLocaleString() + '원\n';
     if (acct) body += '· 입금 계좌: ' + acct.account + ' (' + acct.owner + ')\n';
-    body += '\n확인 후 회신 부탁드립니다. 감사합니다.';
+    body += '\n📱 상세 확인: ' + APP_URL;
+    body += '\n\n확인 후 회신 부탁드립니다. 감사합니다.';
     MailApp.sendEmail(m.email, subj, body);
   });
   // 관리자 요약 메일
@@ -627,7 +697,7 @@ function checkOverdue() {
       + overdue.map(function (o) {
         const m = members.find(function (mm) { return floorNum_(mm.floor) === o.floor; });
         return o.floor + '층 ' + (m ? m.name : '') + ' ' + finals[o.floor - 1].toLocaleString() + '원';
-      }).join('\n') + '\n\n' + SpreadsheetApp.getActiveSpreadsheet().getUrl();
+      }).join('\n') + '\n\n📱 앱: ' + APP_URL + '\n시트: ' + SpreadsheetApp.getActiveSpreadsheet().getUrl();
     MailApp.sendEmail(admin.email, '[수도정산] ' + mm + '월분 미납 요약 (D+' + Math.floor(days) + ')', summary);
   }
   // 리마인더 발송일 기록
@@ -686,6 +756,7 @@ function notifyMembers_(d, imgUrl) {
   }
   const acct = adminAccount_();
   if (acct) body += '\n입금 계좌: ' + acct.account + ' (' + acct.owner + ')\n';
+  body += '\n📱 상세 확인: ' + APP_URL;
   body += '\n상세 내역(시트): ' + sheetUrl;
   if (imgUrl) body += '\n고지서 사진: ' + imgUrl;
 

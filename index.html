@@ -33,7 +33,7 @@
     body.viewer .layout{ grid-template-areas:"v v" "d e" }
     .g-v{ grid-area:v }
   }
-  /* 뷰어(가족 조회) 모드: 입력·수정 UI 숨김, 요약 카드 표시 */
+  /* 뷰어(층별 구성원 조회) 모드: 입력·수정 UI 숨김, 요약 카드 표시 */
   body.viewer .admin-only{ display:none !important }
   .viewer-only{ display:none }
   body.viewer .viewer-only{ display:block }
@@ -278,7 +278,7 @@
       <b style="font-size:14px;color:var(--water-deep)">👥 구성원 관리</b>
       <a id="sheetLink" href="#" target="_blank" rel="noopener" class="edit-btn" style="display:none;text-decoration:none">📋 구성원 시트 열기</a>
     </div>
-    <div class="hint" style="margin-top:4px">시트 내용을 바로 편집할 수 있습니다. 메일수신 Y인 사람에게 정산 메일이 가고, <b>관리자의 계좌</b>가 가족 화면에 입금 계좌로 표시됩니다.</div>
+    <div class="hint" style="margin-top:4px">시트 내용을 바로 편집할 수 있습니다. 메일수신 Y인 사람에게 정산 메일이 가고, <b>관리자의 계좌</b>가 구성원 조회 화면에 입금 계좌로 표시됩니다.</div>
     <div class="mem-toolbar">
       <span id="memDirty" class="mem-badge">저장되지 않은 변경</span>
       <button class="edit-btn" onclick="refresh()">🔄 시트에서 다시 불러오기</button>
@@ -293,7 +293,7 @@
 
 <div class="layout">
 
-<!-- 가족(조회) 화면 전용: 최근 정산 요약 -->
+<!-- 층별 구성원(조회) 화면 전용: 최근 정산 요약 -->
 <div class="card g-v viewer-only" id="viewerCard"></div>
 
 <!-- ① 검침 & 정산 (통합) -->
@@ -421,7 +421,7 @@
   <div class="copybox" id="copybox"></div>
   <div id="photoLinks" style="display:none;margin-top:8px;font-size:13px;background:#F4F8FB;border:1px solid var(--line);border-radius:10px;padding:10px"></div>
   <div id="payBoard" class="pay-board" style="display:none"></div>
-  <button class="btn ghost" onclick="copyText()">가족방에 붙여넣을 문구 복사</button>
+  <button class="btn ghost" onclick="copyText()">구성원에게 공유할 문구 복사</button>
   <button class="btn ghost" id="smsBtn" style="display:none" onclick="openSmsPreview()">📱 구성원에게 문자 보내기</button>
   <button class="btn" id="saveBtn" onclick="save()">이번 검침값 저장 (다음 정산 준비)</button>
 </div>
@@ -503,9 +503,9 @@ const CFG_KEY='sudo-cfg';
 function loadCfg(){ try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); }catch(e){ return {}; } }
 function saveCfg(){ try{ localStorage.setItem(CFG_KEY,JSON.stringify({hook:data.hook||'',key:data.key||''})); }catch(e){} }
 /* ★ GitHub에 올리기 전에 여기에 Apps Script 웹 앱 URL을 넣으세요.
- *   가족(뷰어)은 이 주소로 기록을 '조회만' 할 수 있습니다.
+ *   층별 구성원(뷰어)은 이 주소로 기록을 '조회만' 할 수 있습니다.
  *   기록·수정·전화번호 조회는 관리자 키가 있어야만 동작합니다. */
-const DEFAULT_HOOK='';
+const DEFAULT_HOOK='https://script.google.com/macros/s/AKfycbyYxw8gIlZWpHkOP-J28GK3Dv_taTZ1Axtut4Dxj_OaN8Quzq6Tn0iTWGRBfxR4JIHhAw/exec';
 
 let isAdmin=false;
 function setConnStat(kind){
@@ -522,7 +522,7 @@ function setConnStat(kind){
   el.style.color=m[0]; el.style.fontWeight='700'; el.textContent=m[1];
 }
 
-/* 가족(조회) 화면: 최근 정산 요약 카드 */
+/* 층별 구성원(조회) 화면: 최근 정산 요약 카드 */
 function renderViewerSummary(){
   const el=$('viewerCard'); if(!el) return;
   const h=histSrc()[0];
@@ -1812,13 +1812,13 @@ function renderHist(){
     </div>`;
   });
   $('hist').innerHTML=html+(list.length>=2?
-    '<div class="note">기록이 쌓이면 층별 비율이 일정한지 보입니다. 비율이 안정적이면 매번 검침 없이 고정 비율로 단순화하는 것도 가족과 논의해 보세요.</div>':'');
+    '<div class="note">기록이 쌓이면 층별 비율이 일정한지 보입니다. 비율이 안정적이면 매번 검침 없이 고정 비율로 단순화하는 것도 구성원과 논의해 보세요.</div>':'');
 }
 
 function copyText(){
   const txt=$('copybox').textContent;
   navigator.clipboard.writeText(txt).then(
-    ()=>alert('복사되었습니다. 가족 대화방에 붙여넣으세요.'),
+    ()=>alert('복사되었습니다. 구성원 대화방에 붙여넣으세요.'),
     ()=>alert('복사가 안 되면 아래 문구를 길게 눌러 직접 복사해 주세요.'));
 }
 
