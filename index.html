@@ -169,6 +169,17 @@
   .mem-meta{ display:flex; justify-content:space-between; align-items:center; gap:10px;
     margin-top:10px; padding-top:8px; border-top:1px dashed var(--line); font-size:12.5px; color:var(--sub) }
   .mem-row input,.mem-row select{ margin:0; padding:9px 10px; font-size:14px; min-width:0; width:100%; box-sizing:border-box }
+  /* 입금 계좌 박스 (뷰어 모드) */
+  .acct-box{ position:relative; margin-top:12px; background:#EAF4EE; border:1px solid #CBE5D5; border-radius:12px; padding:12px 14px }
+  .acct-head{ font-size:13px; font-weight:800; color:var(--water-deep) }
+  .acct-owner{ font-weight:600; color:var(--sub); font-size:12px; margin-left:4px }
+  .acct-body{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-top:8px }
+  .acct-val{ font-size:16px; font-weight:800; letter-spacing:.02em; color:var(--ink); font-variant-numeric:tabular-nums; word-break:break-all; flex:1; min-width:0 }
+  .acct-btns{ display:flex; gap:6px; flex-wrap:wrap }
+  .acct-copy{ background:var(--ok); color:#fff; border:none; border-radius:8px; padding:8px 12px; font-size:13px; font-weight:800; cursor:pointer; white-space:nowrap }
+  .acct-copy:active{ transform:scale(.97) }
+  .acct-toast{ position:absolute; top:8px; right:12px; background:var(--water-deep); color:#fff; font-size:11.5px; font-weight:800; padding:3px 10px; border-radius:12px; opacity:0; transition:opacity .2s; pointer-events:none }
+  .acct-toast.on{ opacity:1 }
   /* 이번 달 입금 확인 현황 (뷰어 모드) */
   .my-pay{ margin-top:12px; background:#F4F8FB; border:1px solid var(--line); border-radius:10px; padding:10px 12px }
   .my-pay-head{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px }
@@ -366,14 +377,19 @@
 
   <div id="settlePane" style="display:none">
     <div style="margin-top:12px">
-      <label>1️⃣ 정산 마감 검침 (고지서 구간의 끝)</label>
+      <label>1️⃣ 정산 마감 검침 (이번 회차 기준일 · 내가 검침한 날)</label>
       <select id="closeSel" onchange="onCloseSel()" style="width:100%;margin:0"></select>
-      <div class="hint">기본은 최신 검침이에요. 고지서가 늦게 와서 그 사이에 새 검침을 이미 했다면, 고지서 구간에 맞는 검침을 고르세요. 남는 사용량은 다음 정산으로 자동 이월됩니다.</div>
+      <div class="hint">
+        수도청 고지서 마감일이 아니라 <b>내가 직접 계량기를 읽은 날</b>을 고르는 칸이에요.
+        이 회차는 <b>이전 검침일 → 이 검침일</b> 사이 사용량 비율로 고지금액을 나눕니다.
+        내 검침일과 고지서 마감일 사이의 소비량은 <b>다음 회차에 자연스럽게 이월</b>됩니다
+        (다음 회차의 "이전 검침"이 오늘 값이 되니까요).
+      </div>
     </div>
     <div class="hint" id="periodHint" style="margin-top:6px"></div>
     <div id="prevLine" class="hint" style="margin-top:4px"></div>
     <div id="prevEdit" style="display:none;margin-top:6px;border:1.5px dashed var(--line);border-radius:10px;padding:10px;background:#FBFDFE">
-      <label>이전 검침값 (구간 시작 · 지난 정산 마감)</label>
+      <label>이전 검침값 (구간 시작 · 지난 회차의 내 검침값)</label>
       <div class="row">
         <div><label>1층</label><input type="number" id="p1" inputmode="decimal" step="any" oninput="liveCheck()"></div>
         <div><label>2층</label><input type="number" id="p2" inputmode="decimal" step="any" oninput="liveCheck()"></div>
@@ -579,6 +595,45 @@ function renderMyPayStatus(h){
     <div class="my-pay-meta" style="margin-top:8px">이체 후 반영까지 다소 시간이 걸릴 수 있어요 (수 분 ~ 수 시간). 반영이 늦으면 관리자에게 문의해 주세요.</div>
   </div>`;
 }
+/* 계좌번호만 추출 (은행명·이름 제거) — 복사 편의성. 하이픈은 제거 (송금창에 바로 붙이기 좋게) */
+function extractAccountNumber_(s){
+  const m=String(s||'').match(/([\d\-]{6,})/);
+  return m?m[1].replace(/-/g,''):'';
+}
+function renderAccountBox_(){
+  const acct=data.account||'';
+  const owner=data.accountOwner||'';
+  const numOnly=extractAccountNumber_(acct);
+  return `<div class="acct-box">
+    <div class="acct-head">💳 입금 계좌${owner?` <span class="acct-owner">${esc_(owner)}</span>`:''}</div>
+    <div class="acct-body">
+      <div class="acct-val">${esc_(acct)}</div>
+      <div class="acct-btns">
+        <button class="acct-copy" onclick="copyAccount('full')">📋 전체 복사</button>
+        ${numOnly?`<button class="acct-copy" onclick="copyAccount('num')">🔢 숫자만</button>`:''}
+      </div>
+    </div>
+    <div class="acct-toast" id="acctToast">✓ 복사됨</div>
+  </div>`;
+}
+async function copyAccount(kind){
+  const acct=data.account||'';
+  const val=kind==='num'?extractAccountNumber_(acct):acct;
+  if(!val) return;
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(val);
+    }else{
+      const ta=document.createElement('textarea'); ta.value=val;
+      ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy'); document.body.removeChild(ta);
+    }
+    const t=$('acctToast'); if(t){ t.classList.add('on'); setTimeout(()=>t.classList.remove('on'),1500); }
+  }catch(e){
+    prompt('아래 값을 복사하세요',val);
+  }
+}
 function renderViewerSummary(){
   const el=$('viewerCard'); if(!el) return;
   const h=histSrc()[0];
@@ -597,7 +652,7 @@ function renderViewerSummary(){
     <div class="pipe" style="margin-top:10px">${pipe}</div>
     <div class="vgrid">${[0,1,2].map(i=>
       `<div class="vcell"><span>${i+1}층</span><b>${won(fin[i])}</b><small>${t(h.use[i])}㎥ 사용</small></div>`).join('')}</div>
-    ${data.account?`<div style="margin-top:12px;background:#EAF4EE;border:1px solid #CBE5D5;border-radius:10px;padding:10px 12px;font-size:13.5px">💳 입금 계좌: <b>${data.account}</b>${data.accountOwner?' ('+data.accountOwner+')':''}</div>`:''}
+    ${data.account?renderAccountBox_():''}
     ${renderMyPayStatus(h)}
     <div class="hint" style="margin-top:10px">검침값과 계량기·고지서 사진은 아래 <b>정산 기록</b>에서 확인할 수 있어요. 문의는 관리자(건물주)에게 연락해 주세요.</div>`;
 }
@@ -956,7 +1011,7 @@ function updatePeriod(){
     box.textContent='⚠ 검침일이 지난 정산 마감일('+p+')보다 늦어야 합니다 — 구간이 겹칩니다.';
     return;
   }
-  box.textContent='이번 정산 구간: '+p+' → '+c+' ('+days+'일) · 지난 마감에서 빈틈없이 이어집니다';
+  box.textContent='이번 정산 구간(내 검침 기준): '+p+' → '+c+' ('+days+'일) · 지난 마감에서 빈틈없이 이어집니다';
 }
 
 function onSplitMode(){
