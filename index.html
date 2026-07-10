@@ -109,12 +109,15 @@
   input[type=file]{ width:100%; font-size:13px; padding:9px; border:1.5px dashed var(--line); border-radius:10px; background:#FBFDFE; color:var(--sub) }
   #imgPreview img, .hist-thumb{ height:64px; border-radius:8px; border:1px solid var(--line); margin-top:8px; cursor:pointer }
   .hist-thumb{ margin-top:6px }
-  #smsModal{ display:none; position:fixed; inset:0; background:rgba(10,25,38,.7); z-index:55;
-    align-items:center; justify-content:center; padding:16px }
-  #smsModal.on{ display:flex }
-  #smsModal .sms-box{ background:#fff; border-radius:14px; width:100%; max-width:520px;
-    max-height:calc(100vh - 32px); overflow-y:auto; padding:18px 18px 14px; box-shadow:0 12px 32px rgba(0,0,0,.25) }
-  #smsModal .sms-title{ font-size:16px; font-weight:800; color:var(--water-deep); margin-bottom:12px }
+  #smsModal{ display:none; position:fixed; inset:0; z-index:55; pointer-events:none; padding:16px }
+  #smsModal.on{ display:block }
+  #smsModal .sms-box{ pointer-events:auto; position:absolute; left:50%; top:30px; transform:translateX(-50%);
+    background:#fff; border-radius:14px; width:calc(100% - 32px); max-width:520px;
+    max-height:calc(100vh - 60px); overflow-y:auto; padding:18px 18px 14px;
+    box-shadow:0 12px 32px rgba(0,0,0,.35); border:1px solid var(--line) }
+  #smsModal .sms-title{ font-size:16px; font-weight:800; color:var(--water-deep); margin-bottom:12px;
+    cursor:move; user-select:none; padding-bottom:8px; border-bottom:1px dashed var(--line) }
+  #smsModal .sms-title::before{ content:"⋮⋮ "; font-size:14px; color:var(--sub); letter-spacing:-1px }
   #smsModal .sms-section{ margin-bottom:12px }
   #smsModal .sms-label{ font-size:12.5px; font-weight:700; color:var(--sub); margin-bottom:4px }
   #smsModal .sms-recipients{ background:#F4F8FB; border:1px solid var(--line); border-radius:8px;
@@ -126,10 +129,19 @@
     font-family:inherit; resize:vertical; min-height:180px; box-sizing:border-box }
   #smsModal .sms-actions{ display:flex; gap:8px; justify-content:flex-end; margin-top:8px }
   #smsModal .sms-actions .btn{ flex:0 0 auto; padding:10px 18px }
-  #imgModal{ display:none; position:fixed; inset:0; background:rgba(10,25,38,.85); z-index:50;
-    align-items:center; justify-content:center; padding:20px; flex-direction:column }
-  #imgModal img{ max-width:100%; max-height:82vh; border-radius:10px; background:#fff }
-  #imgModal .close{ color:#fff; font-size:14px; margin-top:14px; background:none; border:1px solid rgba(255,255,255,.5); border-radius:20px; padding:8px 20px; cursor:pointer }
+  #imgModal{ display:none; position:fixed; inset:0; z-index:50; pointer-events:none;
+    padding:20px }
+  #imgModal.on{ display:block }
+  .img-card{ pointer-events:auto; position:absolute; left:50%; top:30px; transform:translateX(-50%);
+    background:#fff; padding:12px; border-radius:12px; box-shadow:0 12px 34px rgba(10,25,38,.35);
+    max-width:calc(100vw - 40px); max-height:calc(100vh - 60px); overflow:auto; border:1px solid var(--line) }
+  #imgModal .img-head{ display:flex; align-items:center; margin-bottom:8px; cursor:move; user-select:none;
+    padding:2px; border-bottom:1px dashed var(--line); padding-bottom:6px }
+  #imgModal .img-head::before{ content:"⋮⋮"; font-size:14px; color:var(--sub); margin-right:8px; letter-spacing:-1px }
+  #imgModal .img-head b{ font-size:14px; color:var(--water-deep); font-weight:700; flex:1 }
+  #imgModal .img-head button{ border:1px solid var(--line); background:#fff; color:var(--sub); border-radius:8px;
+    width:30px; height:30px; font-size:14px; cursor:pointer; margin-left:auto }
+  #imgModal img{ max-width:100%; max-height:70vh; border-radius:8px; display:block }
   #editBanner{ display:none; align-items:center; gap:8px; background:#FFF4E8; border:1.5px solid #F0C9A0;
     border-radius:10px; padding:9px 12px; margin-bottom:10px; font-size:13.5px; font-weight:700; color:#9A5B1E }
   #editBanner button{ margin-left:auto; border:1px solid #E0B285; background:#fff; color:#9A5B1E;
@@ -147,13 +159,18 @@
   .mcell.on{ background:var(--water); color:#fff; cursor:pointer; font-weight:800 }
   .mcell.on:active{ background:var(--water-deep) }
   .mcell.mid{ background:#D9EAF6; color:var(--water-deep); cursor:pointer; font-weight:700; border:1px dashed var(--water) }
-  /* 월 상세 보기 모달 */
-  #monthModal{ display:none; position:fixed; inset:0; background:rgba(10,25,38,.55); z-index:45;
-    align-items:flex-start; justify-content:center; padding:24px 14px; overflow:auto }
-  .mm-card{ background:#fff; border-radius:14px; max-width:560px; width:100%; padding:16px 16px 18px;
-    box-shadow:0 12px 34px rgba(10,25,38,.25) }
-  .mm-head{ display:flex; align-items:center; margin-bottom:4px }
+  /* 월 상세 보기 모달 — 배경 안 막고 드래그로 이동 가능 */
+  #monthModal{ display:none; position:fixed; inset:0; z-index:45;
+    pointer-events:none; padding:24px 14px; overflow:visible }
+  #monthModal.on{ display:block }
+  .mm-card{ pointer-events:auto; background:#fff; border-radius:14px; max-width:560px; width:calc(100% - 28px);
+    padding:16px 16px 18px; box-shadow:0 12px 34px rgba(10,25,38,.35);
+    position:absolute; left:50%; top:24px; transform:translateX(-50%);
+    max-height:calc(100vh - 60px); overflow:auto; border:1px solid var(--line) }
+  .mm-head{ display:flex; align-items:center; margin-bottom:4px; cursor:move; user-select:none;
+    padding:4px 2px; margin:-4px -2px 6px; border-bottom:1px dashed var(--line) }
   .mm-head b{ font-size:16px; color:var(--water-deep) }
+  .mm-head::before{ content:"⋮⋮"; font-size:14px; color:var(--sub); margin-right:8px; letter-spacing:-1px }
   .mm-head button{ margin-left:auto; border:1px solid var(--line); background:#fff; color:var(--sub);
     border-radius:8px; width:30px; height:30px; font-size:14px; cursor:pointer }
   .mm-sec{ border-top:1px solid #EDF2F6; padding-top:12px; margin-top:12px }
@@ -504,17 +521,18 @@
 <!-- 관리자 설정 (평소엔 접혀 있음) -->
 </div><!-- /layout -->
 
-<div id="monthModal" onclick="if(event.target===this)this.style.display='none'">
+<div id="monthModal">
   <div class="mm-card">
-    <div class="mm-head"><b id="mmTitle"></b><button onclick="document.getElementById('monthModal').style.display='none'">✕</button></div>
+    <div class="mm-head"><b id="mmTitle"></b><button onclick="document.getElementById('monthModal').classList.remove('on')">✕</button></div>
     <div id="mmBody"></div>
   </div>
 </div>
 
-<div id="imgModal" onclick="this.style.display='none'">
-  <div id="modalCap" style="color:#fff;font-size:14px;font-weight:700;margin-bottom:10px"></div>
-  <img id="modalImg" alt="고지서 사진">
-  <button class="close">닫기</button>
+<div id="imgModal">
+  <div class="img-card">
+    <div class="img-head"><b id="modalCap"></b><button onclick="document.getElementById('imgModal').classList.remove('on')">✕</button></div>
+    <img id="modalImg" alt="고지서 사진">
+  </div>
 </div>
 
 <div id="smsModal">
@@ -721,7 +739,7 @@ function showDrive(url,label){
   if(!big){ window.open(url,'_blank'); return }
   $('modalCap').textContent=label+' (구글 드라이브)';
   $('modalImg').src=big;
-  $('imgModal').style.display='flex';
+  openModal_('imgModal','.img-card','.img-head');
 }
 
 function compress(file,maxDim,quality){
@@ -769,7 +787,7 @@ function showLive(slot){
   if(!imgs[slot]) return;
   $('modalCap').textContent=SLOT_LABEL[slot]+' (저장 전 미리보기)';
   $('modalImg').src=imgs[slot].full;
-  $('imgModal').style.display='flex';
+  openModal_('imgModal','.img-card','.img-head');
 }
 
 
@@ -913,6 +931,52 @@ async function refresh(initial, silent){
     return false;
   }
 }
+/* 모달 열기 (위치 초기화 + 드래그 바인딩) */
+function openModal_(modalId, cardSel, handleSel){
+  const modal=$(modalId); if(!modal) return;
+  const card=modal.querySelector(cardSel);
+  const handle=modal.querySelector(handleSel);
+  if(card){
+    // 위치 초기화 (마지막 드래그 위치 리셋)
+    card.style.left=''; card.style.top=''; card.style.transform='';
+    card.style.margin='';
+  }
+  modal.classList.add('on');
+  if(card&&handle) makeDraggable_(card, handle);
+}
+
+/* ── 모달 드래그 이동 ─ 백드롭 없이 창처럼 움직이게 ── */
+function makeDraggable_(cardEl, handleEl){
+  if(!cardEl||!handleEl||handleEl._draggable) return;
+  handleEl._draggable=true;
+  let isDown=false, offX=0, offY=0;
+  const start=(cx,cy,ev)=>{
+    if(ev.target.tagName==='BUTTON'||ev.target.tagName==='INPUT'||ev.target.tagName==='TEXTAREA') return false;
+    const rect=cardEl.getBoundingClientRect();
+    offX=cx-rect.left; offY=cy-rect.top;
+    cardEl.style.left=rect.left+'px';
+    cardEl.style.top=rect.top+'px';
+    cardEl.style.transform='none';
+    cardEl.style.margin='0';
+    isDown=true; return true;
+  };
+  const move=(cx,cy)=>{
+    if(!isDown) return;
+    const w=cardEl.offsetWidth, h=cardEl.offsetHeight;
+    const nx=Math.max(0,Math.min(window.innerWidth-40,cx-offX));
+    const ny=Math.max(0,Math.min(window.innerHeight-40,cy-offY));
+    cardEl.style.left=nx+'px';
+    cardEl.style.top=ny+'px';
+  };
+  const end=()=>{ isDown=false; };
+  handleEl.addEventListener('mousedown',e=>{ if(start(e.clientX,e.clientY,e)) e.preventDefault(); });
+  document.addEventListener('mousemove',e=>move(e.clientX,e.clientY));
+  document.addEventListener('mouseup',end);
+  handleEl.addEventListener('touchstart',e=>{ const t=e.touches[0]; start(t.clientX,t.clientY,e); },{passive:true});
+  document.addEventListener('touchmove',e=>{ const t=e.touches[0]; if(t) move(t.clientX,t.clientY); },{passive:true});
+  document.addEventListener('touchend',end);
+}
+
 /* ── 실시간 입금 감지 (경량 ping 폴링) ──
  * 3초마다 서버의 depositTs만 체크 → 변경되면 refresh() 조용히 실행
  * 탭 숨겨지면 정지, 다시 보이면 재개 */
@@ -988,7 +1052,7 @@ async function attachExtra(input){
     pv.innerHTML=`<div class="thumb-wrap"><img src="${row._img.thumb}" alt="증빙 미리보기"><button type="button" class="thumb-x" title="사진 삭제">✕</button></div>`;
     pv.querySelector('img').onclick=()=>{
       $('modalCap').textContent=(row.querySelector('.x-name').value||'추가 비용')+' 증빙 (저장 전 미리보기)';
-      $('modalImg').src=row._img.full; $('imgModal').style.display='flex';
+      $('modalImg').src=row._img.full; openModal_('imgModal','.img-card','.img-head');
     };
     pv.querySelector('.thumb-x').onclick=()=>{
       row._img=null;
@@ -1650,12 +1714,26 @@ async function deleteMid(date){
   }
 }
 
+let midYearSel='current'; // 기본: 최신 연도
+let midExpanded=false;    // 접힘/펼침 상태
 function renderMidList(){
   const box=$('midList'); if(!box) return;
-  const list=midsSrc().slice(0,12);
-  if(!list.length){ box.innerHTML=''; return }
+  const all=midsSrc();
+  if(!all.length){ box.innerHTML=''; return }
   const pts=readingPoints();
-  box.innerHTML='<label style="margin:12px 0 2px">월별 검침 기록</label>'+list.map(m=>{
+  // 연도 목록 (내림차순)
+  const years=[...new Set(all.map(m=>m.date.slice(0,4)))].sort((a,b)=>b.localeCompare(a));
+  const curYear=midYearSel==='current'?years[0]:midYearSel;
+  const filtered=midYearSel==='all'?all:all.filter(m=>m.date.slice(0,4)===curYear);
+  const shown=midExpanded?filtered:filtered.slice(0,4);
+  const yearOpts=`<option value="current">${years[0]}년 (최신)</option>`
+    +years.map(y=>`<option value="${y}" ${curYear===y&&midYearSel!=='current'?'selected':''}>${y}년</option>`).join('')
+    +`<option value="all" ${midYearSel==='all'?'selected':''}>전체 기간</option>`;
+  const header=`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin:12px 0 6px;flex-wrap:wrap">
+    <label style="margin:0">📷 월별 검침 기록 <span style="font-size:11.5px;color:var(--sub);font-weight:400">(총 ${all.length}건${midYearSel!=='all'?` · ${curYear}년 ${filtered.length}건`:''})</span></label>
+    <select onchange="midYearSel=this.value;midExpanded=false;renderMidList()" style="width:auto;padding:5px 8px;font-size:12.5px">${yearOpts}</select>
+  </div>`;
+  const rows=shown.map(m=>{
     const idx=pts.findIndex(p=>p.date===m.date);
     const prev=idx>0?pts[idx-1]:null;
     const useTxt=prev?'직전 대비 '+[0,1,2].map(i=>t(m.readings[i]-prev.r[i])).join(' / ')+'㎥':'';
@@ -1672,6 +1750,8 @@ function renderMidList(){
       ${cells.length?'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:2px">'+cells.join('')+'</div>':''}
     </div>`;
   }).join('');
+  const more=filtered.length>4?`<button class="edit-btn" style="margin-top:8px;width:100%;padding:8px" onclick="midExpanded=!midExpanded;renderMidList()">${midExpanded?'▲ 접기':'▼ 더 보기 ('+(filtered.length-4)+'건)'}</button>`:'';
+  box.innerHTML=header+rows+more;
 }
 
 let chartRange=12; // 최근 12개월 / 24개월 / 0=전체
@@ -1951,7 +2031,7 @@ function openMonth(m){
     (h.extraPhotos||[]).forEach(u=>{ if(u) cells.push(photoCell(u,'추가 증빙')); });
     html+=cells.length?'<div class="mm-photos">'+cells.join('')+'</div>'
       :'<div class="hint" style="margin-top:6px">이 정산에 저장된 사진이 없습니다.</div>';
-    html+=`<button class="btn ghost admin-only" style="margin-top:12px" onclick="document.getElementById('monthModal').style.display='none';loadRecord('${h.date}')">✏️ 이 정산 수정하기</button></div>`;
+    html+=`<button class="btn ghost admin-only" style="margin-top:12px" onclick="document.getElementById('monthModal').classList.remove('on');loadRecord('${h.date}')">✏️ 이 정산 수정하기</button></div>`;
   }
   mids.forEach(md=>{
     html+=`<div class="mm-sec"><b>📷 ${md.date} 검침</b>
@@ -1964,7 +2044,7 @@ function openMonth(m){
   });
   if(!html) html='<div class="empty">이 달의 기록이 없습니다.</div>';
   $('mmBody').innerHTML=html;
-  $('monthModal').style.display='flex';
+  openModal_('monthModal','.mm-card','.mm-head');
 }
 
 function gotoMonth(date){
@@ -2067,7 +2147,7 @@ function openSmsPreview(){
   ta.value=body;
   updateSmsLen();
   ta.oninput=updateSmsLen;
-  $('smsModal').classList.add('on');
+  openModal_('smsModal','.sms-box','.sms-title');
 }
 function updateSmsLen(){
   const v=$('smsBody').value||'';
