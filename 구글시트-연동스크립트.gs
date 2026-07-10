@@ -764,7 +764,13 @@ function saveMembers_(d) {
   return json_({ ok: true, count: list.length, members: getMembers_() });
 }
 
-/** 구성원에게 정산 내역 메일 발송 (메일수신=Y 대상) */
+/** 계좌번호에서 숫자만 뽑기 (은행앱 송금창에 바로 붙여넣기 좋게) */
+function accountDigits_(s) {
+  const m = String(s || '').match(/([\d\-]{6,})/);
+  return m ? m[1].replace(/-/g, '') : '';
+}
+
+/** 구성원에게 정산 내역 메일 발송 (메일수신=Y 대상) — HTML + 계좌 강조 박스 */
 function notifyMembers_(d, imgUrl) {
   const members = getMembers_().filter(function (m) { return m.mail && m.email; });
   if (!members.length) return 0;
@@ -776,37 +782,83 @@ function notifyMembers_(d, imgUrl) {
   const grand = Number(d.total) + Number(d.extraSum || 0);
   const subject = '[수도요금] ' + mm + '월분 정산 안내 — 총 '
     + grand.toLocaleString() + '원';
+  const acct = adminAccount_();
+  const digits = acct ? accountDigits_(acct.account) : '';
 
-  let body = mm + '월분 수도요금 정산 결과입니다.\n'
+  // ── 텍스트 폴백 (HTML 미지원 클라이언트용) ──
+  let plain = mm + '월분 수도요금 정산 결과입니다.\n'
     + '검침 기간: ' + (d.prevDate || '-') + ' → ' + d.date + '\n'
     + '수도 고지금액: ' + Number(d.total).toLocaleString() + '원\n';
   if (extras.length) {
-    body += '추가 비용: ' + extras.map(function (x) {
-      const mm = x.month ? Number(String(x.month).split('-')[1]) + '월분 ' : '';
-      return mm + x.name + ' ' + Number(x.amt).toLocaleString() + '원';
+    plain += '추가 비용: ' + extras.map(function (x) {
+      const mm2 = x.month ? Number(String(x.month).split('-')[1]) + '월분 ' : '';
+      return mm2 + x.name + ' ' + Number(x.amt).toLocaleString() + '원';
     }).join(', ') + '\n';
   }
-  body += '\n';
+  plain += '\n';
   for (let i = 0; i < 3; i++) {
-    body += (i + 1) + '층: 검침 ' + d.prev[i] + '→' + d.curr[i]
+    plain += (i + 1) + '층: 검침 ' + d.prev[i] + '→' + d.curr[i]
       + ' / 사용량 ' + d.use[i] + '㎥ / 부담액 '
-      + Number(finals[i]).toLocaleString() + '원';
-    if (extras.length) {
-      body += ' (수도 ' + Number(d.amt[i]).toLocaleString() + '원 + 추가 '
-        + (Number(finals[i]) - Number(d.amt[i])).toLocaleString() + '원)';
-    }
-    body += '\n';
+      + Number(finals[i]).toLocaleString() + '원\n';
   }
-  const acct = adminAccount_();
-  if (acct) body += '\n입금 계좌: ' + acct.account + ' (' + acct.owner + ')\n';
-  body += '\n※ 위 부담액을 <원 단위까지 정확히> 이체해 주시면 자동으로 확인 처리됩니다.\n'
-       +  '  (반올림하지 마시고 정확한 금액으로 부탁드립니다)';
-  body += '\n\n📱 상세 확인: ' + APP_URL;
-  body += '\n상세 내역(시트): ' + sheetUrl;
-  if (imgUrl) body += '\n고지서 사진: ' + imgUrl;
+  if (acct) plain += '\n입금 계좌: ' + acct.account + ' (' + acct.owner + ')\n';
+  if (digits) plain += '계좌번호(숫자만): ' + digits + '\n';
+  plain += '\n※ 위 부담액을 원 단위까지 정확히 이체하면 자동 확인됩니다.\n';
+  plain += '\n앱: ' + APP_URL + '\n시트: ' + sheetUrl;
+
+  // ── HTML 본문 ──
+  let floorRows = '';
+  for (let i = 0; i < 3; i++) {
+    const bg = i % 2 === 0 ? '#F4F8FB' : '#FFFFFF';
+    floorRows += '<tr>'
+      + '<td style="padding:10px 12px;background:' + bg + ';border-bottom:1px solid #E4EDF3;font-weight:700;color:#0F5E92;width:50px">' + (i + 1) + '층</td>'
+      + '<td style="padding:10px 12px;background:' + bg + ';border-bottom:1px solid #E4EDF3;font-size:12.5px;color:#5B7285">검침 ' + d.prev[i] + '→' + d.curr[i] + ' · ' + d.use[i] + '㎥</td>'
+      + '<td style="padding:10px 12px;background:' + bg + ';border-bottom:1px solid #E4EDF3;text-align:right;font-weight:800;font-size:15px;color:#132A3D;font-variant-numeric:tabular-nums">' + Number(finals[i]).toLocaleString() + '원</td>'
+      + '</tr>';
+  }
+
+  const acctBlock = acct
+    ? '<div style="margin:18px 0;background:#EAF4EE;border:2px solid #0F8C6F;border-radius:12px;padding:14px 16px">'
+      + '<div style="font-size:12px;color:#0A6F58;font-weight:700;letter-spacing:.03em">💳 입금 계좌 (탭해서 복사)</div>'
+      + '<div style="font-size:18px;font-weight:800;color:#132A3D;margin-top:6px;letter-spacing:.02em;font-variant-numeric:tabular-nums;word-break:break-all;user-select:all">'
+      + acct.account + '</div>'
+      + (digits ? '<div style="margin-top:8px;padding:8px 10px;background:#fff;border:1px dashed #CBE5D5;border-radius:8px;font-family:monospace;font-size:16px;font-weight:700;color:#0F5E92;user-select:all;letter-spacing:.05em">' + digits + '</div><div style="font-size:11.5px;color:#5B7285;margin-top:4px">↑ 위 숫자만 복사해서 은행앱 송금창에 바로 붙여넣으세요</div>' : '')
+      + '<div style="font-size:12px;color:#0A6F58;margin-top:6px">예금주: <b>' + acct.owner + '</b></div>'
+      + '</div>'
+    : '';
+
+  const extraLine = extras.length
+    ? '<div style="margin-top:8px;font-size:13px;color:#5B7285">추가 비용: ' + extras.map(function (x) {
+      const mm2 = x.month ? Number(String(x.month).split('-')[1]) + '월분 ' : '';
+      return mm2 + x.name + ' ' + Number(x.amt).toLocaleString() + '원';
+    }).join(', ') + '</div>' : '';
+
+  const html = '<div style="font-family:-apple-system,BlinkMacSystemFont,\'Malgun Gothic\',\'Noto Sans KR\',sans-serif;max-width:560px;margin:0 auto;color:#132A3D;padding:20px 16px">'
+    + '<div style="text-align:center;margin-bottom:14px">'
+    + '<div style="font-size:22px;font-weight:800;color:#0F5E92">💧 ' + mm + '월분 수도요금 정산</div>'
+    + '<div style="font-size:13px;color:#5B7285;margin-top:4px">검침 기간: ' + (d.prevDate || '-') + ' → ' + d.date + '</div>'
+    + '</div>'
+    + '<div style="background:#F4F8FB;border:1px solid #D5E0E8;border-radius:12px;padding:12px 14px">'
+    + '<div style="font-size:12px;color:#5B7285">수도 고지금액</div>'
+    + '<div style="font-size:20px;font-weight:800;color:#132A3D;margin-top:2px">' + Number(d.total).toLocaleString() + '원</div>'
+    + extraLine
+    + '</div>'
+    + '<div style="margin-top:16px;font-size:13px;font-weight:700;color:#0F5E92">📊 세대별 부담액</div>'
+    + '<table style="width:100%;border-collapse:collapse;margin-top:6px;border:1px solid #E4EDF3;border-radius:10px;overflow:hidden">' + floorRows + '</table>'
+    + '<div style="margin-top:12px;padding:10px 12px;background:#FDF6E9;border:1px solid #F0DFB5;border-radius:10px;font-size:13px;color:#9A5B1E;font-weight:700">'
+    + '💰 <b>원 단위까지 정확히</b> 이체하시면 자동으로 확인 처리됩니다 (반올림 X)'
+    + '</div>'
+    + acctBlock
+    + '<div style="margin-top:16px;text-align:center">'
+    + '<a href="' + APP_URL + '" style="display:inline-block;background:#0F5E92;color:#fff;text-decoration:none;padding:10px 20px;border-radius:10px;font-weight:700;font-size:14px">📱 앱에서 상세 확인</a>'
+    + '</div>'
+    + (imgUrl ? '<div style="margin-top:12px;text-align:center;font-size:12px"><a href="' + imgUrl + '" style="color:#1B7FBF">고지서 사진 보기 →</a></div>' : '')
+    + '<div style="margin-top:16px;font-size:11px;color:#8FA1AF;text-align:center;border-top:1px solid #EDF2F6;padding-top:12px">'
+    + '<a href="' + sheetUrl + '" style="color:#8FA1AF">시트 원본 →</a></div>'
+    + '</div>';
 
   members.forEach(function (m) {
-    MailApp.sendEmail(m.email, subject, body);
+    MailApp.sendEmail({ to: m.email, subject: subject, body: plain, htmlBody: html });
   });
   return members.length;
 }
