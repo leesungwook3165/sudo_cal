@@ -384,6 +384,7 @@
     <div style="margin-top:12px">
       <label>📅 검침 날짜 (매월 같은 날 권장)</label>
       <input type="date" id="date" onchange="onDateChange()" oninput="syncDateFromLog_()">
+      <div id="dateHint" class="hint" style="margin-top:6px"></div>
     </div>
     <button class="btn ghost" id="midBtn" onclick="saveMid()" style="margin-top:10px">이번 달 검침 기록하기</button>
     <div class="hint">고지서가 없는 달은 이 버튼만 누르면 끝. 기록은 그래프와 아래 목록에 쌓이고, 정산 금액에는 영향을 주지 않아요.</div>
@@ -847,8 +848,10 @@ const won=n=>Math.round(n).toLocaleString('ko-KR')+'원';
 const t=n=>(Math.round(n*10)/10).toLocaleString('ko-KR');
 
 async function load(){
-  $('date').value=new Date().toISOString().slice(0,10);
-  $('billMonth').value=$('date').value.slice(0,7);
+  const today=new Date().toISOString().slice(0,10);
+  $('date').value=today;
+  if($('dateSettle')) $('dateSettle').value=today;
+  $('billMonth').value=today.slice(0,7);
   const c=loadCfg();
   data.hook=c.hook||DEFAULT_HOOK;
   data.key=c.key||'';
@@ -867,15 +870,14 @@ async function load(){
   startPingLoop_(); // 백그라운드 실시간 감지 시작
   if(data.people) [1,2,3].forEach(i=>$('n'+i).value=data.people[i-1]);
   updateMeterLabels();
-  // 최신 검침점이 지난 정산 이후 것이면 '이번 검침'에 자동 반영
+  // 최신 검침값을 c1/c2/c3에 참고용으로 미리 채움 (날짜는 오늘로 유지)
   const _pts=readingPoints();
   const _last=_pts.length?_pts[_pts.length-1]:null;
   if(_last&&(!data.prev||_last.date>data.prev.date)){
     [1,2,3].forEach(i=>{ if($('c'+i).value==='') $('c'+i).value=_last.r[i-1]; });
-    $('date').value=_last.date;
-    if(!billMonthManual) $('billMonth').value=_last.date.slice(0,7);
   }
   updatePeriod();
+  updateDateHint_();
   renderHist();
 }
 
@@ -1087,6 +1089,35 @@ function onDateChange(){
   updateMeterLabels();
   updatePeriod();
   if(!billMonthManual) $('billMonth').value=$('date').value.slice(0,7);
+  updateDateHint_();
+}
+
+/* 검침 날짜 중복·연속성 체크 (경고 힌트만 표시, 저장은 계속 가능) */
+function updateDateHint_(){
+  const el=$('dateHint'); if(!el) return;
+  const d=$('date').value; if(!d){ el.innerHTML=''; return; }
+  const pts=readingPoints();
+  const dup=pts.find(p=>p.date===d);
+  // 중복 검사
+  if(dup){
+    el.innerHTML=`<span style="color:var(--warn);font-weight:700">⚠ 이 날짜(${d})에 이미 검침 기록이 있습니다. 저장하면 <b>기존 값이 덮어써집니다</b>.</span>`;
+    return;
+  }
+  // 연속성 검사 — 마지막 검침 이후 며칠 지났는지
+  const last=pts.length?pts[pts.length-1]:null;
+  if(!last){ el.innerHTML=`<span class="hint">첫 검침입니다. 오늘 날짜(${d})로 저장됩니다.</span>`; return; }
+  const gap=Math.round((new Date(d)-new Date(last.date))/86400000);
+  if(gap<0){
+    el.innerHTML=`<span style="color:var(--warn);font-weight:700">⚠ 마지막 검침(${last.date})보다 이전 날짜입니다. 시간 순서가 뒤집힙니다.</span>`;
+  }else if(gap===0){
+    // dup에서 걸림 (도달 안 함)
+  }else if(gap>45){
+    el.innerHTML=`<span style="color:var(--warn);font-weight:700">⚠ 마지막 검침(${last.date})으로부터 ${gap}일 지났습니다. 중간 달을 건너뛴 것 같아요.</span>`;
+  }else if(gap>=25&&gap<=35){
+    el.innerHTML=`<span style="color:var(--ok)">✓ 마지막 검침(${last.date}) 이후 ${gap}일 — 정상 주기입니다.</span>`;
+  }else{
+    el.innerHTML=`<span class="hint">마지막 검침(${last.date}) 이후 ${gap}일 경과.</span>`;
+  }
 }
 
 /* 정산 구간 표시 + 역전 검사 (이전 검침일은 항상 지난 정산 마감일) */
@@ -1650,6 +1681,9 @@ async function saveMid(){
   if([1,2,3].some(i=>$('c'+i).value==='')||r.some(v=>isNaN(v))){
     alert('세 층의 계량기 숫자를 모두 입력해 주세요.'); return
   }
+  // 같은 날짜 중복 저장 방지 — 관리자 확인
+  const _existing=readingPoints().find(p=>p.date===date);
+  if(_existing&&!confirm(date+' 검침 기록이 이미 있습니다.\n같은 날짜로 저장하면 <기존 값이 덮어써집니다>.\n\n덮어쓸까요?')) return;
   // 이 회차 계량기 사진 (f1~f3 슬롯 → 기록용 m1~m3)
   const midImgs={};
   ['f1','f2','f3'].forEach((fs,i)=>{ if(imgs[fs]) midImgs['m'+(i+1)]=imgs[fs]; });
