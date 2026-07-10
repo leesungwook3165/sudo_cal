@@ -1172,9 +1172,38 @@ function setMode(m){
   $('modeSettle').classList.toggle('on',m==='settle');
   $('logPane').style.display=m==='log'?'block':'none';
   $('settlePane').style.display=m==='settle'?'block':'none';
-  // 모드 전환 시 날짜 필드 동기화 (두 입력은 항상 같은 값 유지)
-  if(m==='settle'){ $('dateSettle').value=$('date').value; renderCloseSel(); updatePeriod(); }
-  else { $('date').value=$('dateSettle').value||$('date').value; }
+  if(m==='settle'){
+    if(!editing) autoSuggestSettleDate_();
+    else $('dateSettle').value=$('date').value; // 수정 모드: loadRecord가 세팅한 값 유지
+    renderCloseSel();
+    updatePeriod();
+    updateDateHint_();
+  }else{
+    $('date').value=$('dateSettle').value||$('date').value;
+    updateDateHint_();
+  }
+}
+
+/* 정산 모드 진입 시 dateSettle 자동 제안
+ * B: 이전 정산 이후의 최신 검침점 있음 → 그 날짜로 세팅 + c1/c2/c3 자동 채움
+ * C: 이전 정산은 있지만 이후 검침 없음 → 이전 정산 + 30일 제안
+ * A: 아무 기록 없음 → 오늘 날짜 유지 */
+function autoSuggestSettleDate_(){
+  const base=data.prev?data.prev.date:null;
+  const pts=readingPoints();
+  const candidates=base?pts.filter(p=>p.date>base):pts;
+  if(candidates.length){
+    const latest=candidates[candidates.length-1];
+    setDateBoth_(latest.date);
+    [1,2,3].forEach(i=>{ if($('c'+i).value==='') $('c'+i).value=latest.r[i-1]; });
+    if(!billMonthManual) $('billMonth').value=latest.date.slice(0,7);
+  }else if(base){
+    const d=new Date(base+'T00:00:00'); d.setDate(d.getDate()+30);
+    const suggested=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    setDateBoth_(suggested);
+    if(!billMonthManual) $('billMonth').value=suggested.slice(0,7);
+  }
+  // A 케이스: 아무 기록 없음 → dateSettle은 이미 오늘 (load에서 세팅됨), 유지
 }
 /* 로그 모드에서 날짜 변경 시 정산 모드 입력도 함께 */
 function syncDateFromLog_(){ const ds=$('dateSettle'); if(ds) ds.value=$('date').value; onDateChange(); }
