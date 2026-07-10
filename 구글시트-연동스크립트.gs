@@ -803,7 +803,9 @@ function notifyMembers_(d, imgUrl) {
   }
   if (acct) plain += '\n입금 계좌: ' + acct.account + ' (' + acct.owner + ')\n';
   if (digits) plain += '계좌번호(숫자만): ' + digits + '\n';
-  plain += '\n※ 위 부담액을 원 단위까지 정확히 이체하면 자동 확인됩니다.\n';
+  plain += '\n※ 자동 확인을 위해 부탁드립니다:\n';
+  plain += '  ① 부담액을 원 단위까지 정확히 이체 (반올림 X)\n';
+  plain += '  ② 이체 시 "보내는 사람 표시명"을 "N층 이름" 형식으로 (예: 2층 김철수)\n';
   plain += '\n앱: ' + APP_URL + '\n시트: ' + sheetUrl;
 
   // ── HTML 본문 ──
@@ -845,8 +847,13 @@ function notifyMembers_(d, imgUrl) {
     + '</div>'
     + '<div style="margin-top:16px;font-size:13px;font-weight:700;color:#0F5E92">📊 세대별 부담액</div>'
     + '<table style="width:100%;border-collapse:collapse;margin-top:6px;border:1px solid #E4EDF3;border-radius:10px;overflow:hidden">' + floorRows + '</table>'
-    + '<div style="margin-top:12px;padding:10px 12px;background:#FDF6E9;border:1px solid #F0DFB5;border-radius:10px;font-size:13px;color:#9A5B1E;font-weight:700">'
-    + '💰 <b>원 단위까지 정확히</b> 이체하시면 자동으로 확인 처리됩니다 (반올림 X)'
+    + '<div style="margin-top:12px;padding:12px 14px;background:#FDF6E9;border:1px solid #F0DFB5;border-radius:10px;font-size:13px;color:#9A5B1E">'
+    + '<div style="font-weight:800;margin-bottom:6px">💰 자동 확인을 위해 부탁드립니다</div>'
+    + '<div style="line-height:1.7">'
+    + '① 부담액을 <b>원 단위까지 정확히</b> 이체 <span style="font-size:11.5px;color:#B4552D">(반올림 X)</span><br>'
+    + '② 이체 시 <b>보내는 사람 표시명</b>을 <b>"N층 이름"</b> 형식으로<br>'
+    + '<span style="display:inline-block;margin-left:14px;padding:3px 10px;background:#fff;border:1px dashed #F0DFB5;border-radius:6px;font-family:monospace;font-weight:700">예: 2층 김철수</span>'
+    + '</div>'
     + '</div>'
     + acctBlock
     + '<div style="margin-top:16px;text-align:center">'
